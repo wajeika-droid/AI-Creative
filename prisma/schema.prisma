@@ -1,0 +1,274 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  roleId       String
+  role         Role     @relation(fields: [roleId], references: [id])
+  creatorProfile    CreatorProfile?
+  advertiserProfile AdvertiserProfile?
+  teamMembers       TeamMember[]
+  ownedTeams        Team[]
+  wallet            Wallet?
+  subscription      Subscription?
+  campaigns         Campaign[]
+  affiliateLinks    AffiliateLink[]
+  commissions       Commission[]
+  tokenUsages       TokenUsage[]
+  aiJobs            AIJob[]
+  generatedContents GeneratedContent[]
+  generatedVideos   GeneratedVideo[]
+  workflows         Workflow[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  permissions Permission[]
+  users       User[]
+}
+
+model Permission {
+  id   String @id @default(uuid())
+  name String @unique
+  roles Role[]
+}
+
+model CreatorProfile {
+  id          String @id @default(uuid())
+  userId      String @unique
+  user        User   @relation(fields: [userId], references: [id])
+  bio         String?
+  socialLinks Json?
+}
+
+model AdvertiserProfile {
+  id          String @id @default(uuid())
+  userId      String @unique
+  user        User   @relation(fields: [userId], references: [id])
+  companyName String
+  website     String?
+}
+
+model Team {
+  id          String @id @default(uuid())
+  name        String
+  ownerId     String
+  owner       User   @relation(fields: [ownerId], references: [id])
+  members     TeamMember[]
+}
+
+model TeamMember {
+  id        String @id @default(uuid())
+  teamId    String
+  userId    String
+  role      String
+  team      Team   @relation(fields: [teamId], references: [id])
+  user      User   @relation(fields: [userId], references: [id])
+}
+
+model Campaign {
+  id               String   @id @default(uuid())
+  advertiserId     String
+  name             String
+  budget           Decimal  @default(0)
+  commissionRate   Float    @default(0)
+  startDate        DateTime?
+  endDate          DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  advertiser       User     @relation(fields: [advertiserId], references: [id])
+  products         Product[]
+}
+
+model Product {
+  id          String @id @default(uuid())
+  campaignId  String
+  name        String
+  price       Decimal @default(0)
+  affiliateCommission Float @default(0)
+  campaign    Campaign @relation(fields: [campaignId], references: [id])
+  affiliateLinks AffiliateLink[]
+}
+
+model AffiliateLink {
+  id        String @id @default(uuid())
+  productId String
+  creatorId String
+  token     String @unique
+  product   Product @relation(fields: [productId], references: [id])
+  creator   User    @relation(fields: [creatorId], references: [id])
+  clicks    Click[]
+  conversions Conversion[]
+}
+
+model Click {
+  id             String @id @default(uuid())
+  affiliateLinkId String
+  createdAt      DateTime @default(now())
+  affiliateLink  AffiliateLink @relation(fields: [affiliateLinkId], references: [id])
+}
+
+model Conversion {
+  id               String @id @default(uuid())
+  affiliateLinkId  String
+  amount           Decimal @default(0)
+  createdAt        DateTime @default(now())
+  affiliateLink    AffiliateLink @relation(fields: [affiliateLinkId], references: [id])
+}
+
+model Commission {
+  id          String @id @default(uuid())
+  userId      String
+  amount      Decimal @default(0)
+  description String?
+  createdAt   DateTime @default(now())
+  user        User @relation(fields: [userId], references: [id])
+}
+
+model Wallet {
+  id        String @id @default(uuid())
+  userId    String @unique
+  balance   Decimal @default(0)
+  pending   Decimal @default(0)
+  user      User @relation(fields: [userId], references: [id])
+  transactions Transaction[]
+  payouts   Payout[]
+}
+
+model Transaction {
+  id        String @id @default(uuid())
+  walletId  String
+  amount    Decimal @default(0)
+  type      String // credit/debit
+  note      String?
+  createdAt DateTime @default(now())
+  wallet    Wallet @relation(fields: [walletId], references: [id])
+}
+
+model Payout {
+  id        String @id @default(uuid())
+  walletId  String
+  amount    Decimal @default(0)
+  status    String @default("pending") // pending, approved, paid, rejected
+  note      String?
+  requestedAt DateTime @default(now())
+  processedAt DateTime?
+  wallet    Wallet @relation(fields: [walletId], references: [id])
+}
+
+model Subscription {
+  id        String @id @default(uuid())
+  userId    String   @unique
+  plan      String
+  startDate DateTime @default(now())
+  endDate   DateTime?
+  tokenQuota Int @default(0)
+  user      User @relation(fields: [userId], references: [id])
+}
+
+model TokenUsage {
+  id        String @id @default(uuid())
+  userId    String
+  usedTokens Int @default(0)
+  date      DateTime @default(now())
+  user      User @relation(fields: [userId], references: [id])
+}
+
+model AIProvider {
+  id          String @id @default(uuid())
+  name        String
+  type        String // text, image, video, voice
+  config      Json
+  enabled     Boolean @default(true)
+  jobs        AIJob[]
+}
+
+model AIJob {
+  id          String @id @default(uuid())
+  userId      String
+  providerId  String
+  type        String // e.g., text_generation, video_render
+  status      String @default("queued") // queued, running, success, failed
+  input       Json
+  output      Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User @relation(fields: [userId], references: [id])
+  provider    AIProvider @relation(fields: [providerId], references: [id])
+  generatedContent GeneratedContent?
+  generatedVideo   GeneratedVideo?
+}
+
+model GeneratedContent {
+  id        String @id @default(uuid())
+  userId    String
+  jobId     String   @unique
+  content   Json
+  createdAt DateTime @default(now())
+  user      User @relation(fields: [userId], references: [id])
+  job       AIJob @relation(fields: [jobId], references: [id])
+}
+
+model GeneratedVideo {
+  id        String @id @default(uuid())
+  userId    String
+  jobId     String   @unique
+  url       String
+  metadata  Json?
+  createdAt DateTime @default(now())
+  user      User @relation(fields: [userId], references: [id])
+  job       AIJob @relation(fields: [jobId], references: [id])
+}
+
+model Workflow {
+  id          String @id @default(uuid())
+  userId      String
+  name        String
+  description String?
+  isTemplate  Boolean @default(false)
+  steps       WorkflowStep[]
+  createdAt   DateTime @default(now())
+  user        User @relation(fields: [userId], references: [id])
+}
+
+model WorkflowStep {
+  id          String @id @default(uuid())
+  workflowId  String
+  order       Int
+  type        String // e.g., generate_script, render_video
+  config      Json?
+  workflow    Workflow @relation(fields: [workflowId], references: [id])
+}
+
+model Notification {
+  id        String @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  read      Boolean @default(false)
+  createdAt DateTime @default(now())
+  user      User @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id        String @id @default(uuid())
+  userId    String?
+  action    String
+  details   Json?
+  createdAt DateTime @default(now())
+  user      User? @relation(fields: [userId], references: [id])
+}
+
