@@ -8,6 +8,7 @@ import {
   Routes,
 } from 'react-router-dom';
 import {
+  CalendarClock,
   Clapperboard,
   CreditCard,
   LayoutDashboard,
@@ -30,6 +31,7 @@ import Affiliate from './pages/Affiliate';
 import Advertiser from './pages/Advertiser';
 import Team from './pages/Team';
 import WorkflowBuilder from './pages/WorkflowBuilder';
+import Automation from './pages/Automation';
 import Subscription from './pages/Subscription';
 import Wallet from './pages/Wallet';
 import AdminPanel from './pages/AdminPanel';
@@ -38,6 +40,7 @@ import ReferralLanding from './pages/ReferralLanding';
 const menuMain = [
   { to: '/', label: 'Overview', icon: LayoutDashboard },
   { to: '/video', label: 'AI Video Studio', icon: Clapperboard, badge: 'AI' },
+  { to: '/automation', label: 'Automation', icon: CalendarClock, badge: 'NEW' },
   { to: '/affiliate', label: 'Affiliate Center', icon: Link2 },
   { to: '/workflow', label: 'Workflow Builder', icon: Workflow },
 ];
@@ -212,6 +215,7 @@ export default function App() {
           <Route path="advertiser" element={<Advertiser />} />
           <Route path="team" element={<Team />} />
           <Route path="workflow" element={<WorkflowBuilder />} />
+          <Route path="automation" element={<Automation />} />
           <Route path="subscription" element={<Subscription />} />
           <Route path="wallet" element={<Wallet />} />
           <Route path="admin" element={<AdminPanel />} />

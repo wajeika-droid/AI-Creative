@@ -35,6 +35,13 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+// Narration longer than the video is sped up so it fits before the last scene.
+export function fitTempo(voiceDuration: number, duration: number) {
+  if (!voiceDuration) return 1;
+  const target = Math.max(1, duration - 0.3);
+  return clamp(voiceDuration / target, 1, 2.4);
+}
+
 function tempoFilters(factor: number) {
   const filters: string[] = [];
   let remaining = clamp(factor, 1, 2.4);
@@ -88,8 +95,7 @@ export async function muxAudio(options: MixOptions) {
   let musicIndex = -1;
 
   if (hasVoice) {
-    const target = Math.max(1, duration - 0.3);
-    const factor = options.voiceDuration ? clamp(options.voiceDuration / target, 1, 2.4) : 1;
+    const factor = fitTempo(options.voiceDuration ?? 0, duration);
     const voiceChain = [
       'aresample=44100',
       'aformat=sample_fmts=fltp:channel_layouts=stereo',

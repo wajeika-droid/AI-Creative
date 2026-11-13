@@ -7,8 +7,8 @@ import { promisify } from 'node:util';
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { prisma } from '../lib/prisma';
-import { muxAudio, resolveMusicStyle } from './audioTrack';
-import { probeDuration, resolveVoice, synthesizeSpeech } from './tts';
+import { muxAudio, resolveMusicStyle, fitTempo } from './audioTrack';
+import { probeDuration, resolveVoice, shiftSubtitles, synthesizeSpeech } from './tts';
 
 const connection = new IORedis(process.env.REDIS_URL || 'redis://redis:6379', {
   maxRetriesPerRequest: null,
@@ -84,25 +84,6 @@ async function renderVideoFile(jobId: string, input: any) {
         : Math.min(0.4, Math.min(...durations) / 4);
 
     const caption = plainText(input?.caption || input?.text || input?.script).slice(0, 260);
-    const showCaption = input?.showSubtitles !== false && caption.length > 0;
-    const captionSize = input?.subtitleSize === 'Large' ? 34 : input?.subtitleSize === 'Small' ? 22 : 27;
-    const brand = plainText(input?.brandName).slice(0, 40);
-    const brandColor = /^#[0-9a-f]{6}$/i.test(String(input?.brandColor || ''))
-      ? String(input.brandColor).replace('#', '0x')
-      : '0x7c5cff';
-
-    let captionFile = '';
-    if (showCaption) {
-      captionFile = path.join(tmpDir, 'caption.txt');
-      await fs.writeFile(captionFile, caption);
-    }
-
-    let brandFile = '';
-    if (brand) {
-      brandFile = path.join(tmpDir, 'brand.txt');
-      await fs.writeFile(brandFile, brand);
-    }
-
     const voiceEnabled = input?.voiceEnabled !== false;
     const voiceText = plainText(input?.voiceScript || caption || input?.script || input?.text).slice(
       0,
@@ -123,6 +104,35 @@ async function renderVideoFile(jobId: string, input: any) {
             return null;
           })
         : Promise.resolve(null);
+
+    // Auto subtitles reuse the TTS word timing. When they will be burned, the
+    // static caption must be skipped so the two texts do not overlap.
+    const wantsAutoSubtitles =
+      voiceEnabled &&
+      input?.autoSubtitles !== false &&
+      input?.showSubtitles !== false &&
+      !!voiceText;
+    const earlySpeech = wantsAutoSubtitles ? await speechPromise : null;
+    const autoSubtitles = !!earlySpeech?.subtitleFile;
+    const showCaption = !autoSubtitles && input?.showSubtitles !== false && caption.length > 0;
+    const captionSize = input?.subtitleSize === 'Large' ? 34 : input?.subtitleSize === 'Small' ? 22 : 27;
+    const brand = plainText(input?.brandName).slice(0, 40);
+    const brandColor = /^#[0-9a-f]{6}$/i.test(String(input?.brandColor || ''))
+      ? String(input.brandColor).replace('#', '0x')
+      : '0x7c5cff';
+
+    let captionFile = '';
+    if (showCaption) {
+      captionFile = path.join(tmpDir, 'caption.txt');
+      await fs.writeFile(captionFile, caption);
+    }
+
+    let brandFile = '';
+    if (brand) {
+      brandFile = path.join(tmpDir, 'brand.txt');
+      await fs.writeFile(brandFile, brand);
+    }
+
     const musicStyle =
       input?.musicStyle === undefined ? 'Soft Ambient' : resolveMusicStyle(input.musicStyle);
     const musicVolume = clamp(Number(input?.musicVolume ?? 0.3), 0, 1);
@@ -225,10 +235,52 @@ async function renderVideoFile(jobId: string, input: any) {
       ffmpegOptions
     );
 
-    const speech = await speechPromise;
+    const speech = earlySpeech ?? (await speechPromise);
     const voiceDuration = speech ? await probeDuration(speech.file) : 0;
+    const tempo = speech ? fitTempo(voiceDuration, total) : 1;
+    let videoForMux = silentVideo;
+    let subtitleUrl: string | null = null;
+    let cueCount = 0;
+
+    if (autoSubtitles && speech?.subtitleFile) {
+      try {
+        const rawSrt = await fs.readFile(speech.subtitleFile, 'utf8');
+        const adjusted = shiftSubtitles(rawSrt, tempo, 0.25, total);
+        cueCount = (adjusted.match(/-->/g) || []).length;
+        if (cueCount > 0) {
+          const srtPath = path.join(tmpDir, 'subtitles.srt');
+          await fs.writeFile(srtPath, adjusted);
+          const subFontSize =
+            input?.subtitleSize === 'Large' ? 22 : input?.subtitleSize === 'Small' ? 14 : 18;
+          const captioned = path.join(tmpDir, 'captioned.mp4');
+          await execFileAsync(
+            'ffmpeg',
+            [
+              '-loglevel', 'error',
+              '-i', silentVideo,
+              '-vf',
+              `subtitles=${srtPath.replace(/\\/g, '/').replace(/:/g, '\\:')}:force_style='FontName=DejaVu Sans,FontSize=${subFontSize},PrimaryColour=&HFFFFFF&,OutlineColour=&H000000&,BorderStyle=3,Outline=1,Shadow=0,Alignment=2,MarginV=26'`,
+              '-c:v', 'libx264',
+              '-preset', 'ultrafast',
+              '-crf', '26',
+              '-pix_fmt', 'yuv420p',
+              '-an',
+              '-y', captioned,
+            ],
+            ffmpegOptions
+          );
+          videoForMux = captioned;
+          await fs.writeFile(path.join(STORAGE_DIR, `${jobId}.srt`), adjusted);
+          subtitleUrl = `/api/v1/video/subtitles/${jobId}.srt`;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`Subtitle otomatis gagal, render tanpa subtitle: ${message}`);
+      }
+    }
+
     await muxAudio({
-      silentVideo,
+      silentVideo: videoForMux,
       outPath,
       duration: total,
       voiceFile: speech?.file,
@@ -260,6 +312,9 @@ async function renderVideoFile(jobId: string, input: any) {
           : { enabled: false },
         music: { style: musicStyle, volume: musicVolume },
       },
+      subtitles: subtitleUrl
+        ? { url: subtitleUrl, cues: cueCount, source: 'auto' }
+        : { url: null, cues: 0, source: 'none' },
       generatedAt: new Date().toISOString(),
     };
   } finally {
@@ -361,6 +416,26 @@ export const aiWorker = new Worker(
             data: { status: 'failed' },
           })
           .catch(() => undefined);
+        const automationId = (job.data.input as any)?.automationId;
+        if (automationId) {
+          const automation = await prisma.automation
+            .findUnique({
+              where: { id: automationId },
+              select: { userId: true, name: true },
+            })
+            .catch(() => null);
+          if (automation) {
+            await prisma.notification
+              .create({
+                data: {
+                  userId: automation.userId,
+                  title: 'Render otomasi gagal',
+                  body: `"${automation.name}" gagal dirender. Periksa AI Video Studio untuk detailnya.`,
+                },
+              })
+              .catch(() => undefined);
+          }
+        }
       }
       throw err;
     }

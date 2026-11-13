@@ -29,6 +29,7 @@ const videoSchema = z
     scenes: z.array(sceneSchema).max(8).optional(),
     caption: z.string().max(2000).optional(),
     showSubtitles: z.boolean().optional(),
+    autoSubtitles: z.boolean().optional(),
     subtitleSize: z.enum(['Small', 'Medium', 'Large']).optional(),
     subtitlePosition: z.enum(['Top', 'Bottom']).optional(),
     transition: z.enum(['None', 'Fade', 'Slide', 'Zoom']).optional(),
@@ -155,6 +156,23 @@ router.get('/files/:name', async (req: Request, res: Response) => {
   });
 });
 
+router.get('/subtitles/:name', async (req: Request, res: Response) => {
+  const jobId = req.params.name.replace(/\.srt$/i, '');
+  if (!req.params.name.toLowerCase().endsWith('.srt') || !VIDEO_FILE_PATTERN.test(jobId)) {
+    return res.status(404).json({ error: 'Subtitle tidak ditemukan' });
+  }
+  const record = await prisma.generatedVideo.findFirst({
+    where: { jobId },
+    select: { id: true },
+  });
+  if (!record) return res.status(404).json({ error: 'Subtitle tidak ditemukan' });
+  res.removeHeader('Content-Security-Policy');
+  res.attachment(`${jobId}.srt`);
+  res.sendFile(path.join(STORAGE_DIR, `${jobId}.srt`), error => {
+    if (error && !res.headersSent) res.status(404).json({ error: 'Subtitle tidak ditemukan' });
+  });
+});
+
 router.get('/', authenticate, rbac('create_video'), async (req: Request, res: Response) => {
   const userId = (req as any).user.id;
   const items = await prisma.generatedVideo.findMany({
@@ -183,6 +201,7 @@ router.delete('/:id', authenticate, rbac('create_video'), async (req: Request, r
   if (!item) return res.status(404).json({ error: 'Render tidak ditemukan' });
   await prisma.generatedVideo.delete({ where: { id: item.id } });
   await fs.rm(path.join(STORAGE_DIR, `${item.jobId}.mp4`), { force: true });
+  await fs.rm(path.join(STORAGE_DIR, `${item.jobId}.srt`), { force: true });
   res.json({ ok: true });
 });
 

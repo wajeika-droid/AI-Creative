@@ -91,6 +91,7 @@ export default function VideoStudio() {
   const [caption, setCaption] = useState('AI is transforming the way we create, connect, and grow.');
   const [scriptText, setScriptText] = useState(defaultScript);
   const [showSubtitles, setShowSubtitles] = useState(true);
+  const [autoSubtitles, setAutoSubtitles] = useState(true);
   const [subtitleSize, setSubtitleSize] = useState('Medium');
   const [subtitlePosition, setSubtitlePosition] = useState('Bottom');
   const [voice, setVoice] = useState('Ava (Neutral)');
@@ -149,6 +150,7 @@ export default function VideoStudio() {
         setCaption(draft.caption ?? '');
         setScriptText(draft.scriptText ?? defaultScript);
         setShowSubtitles(draft.showSubtitles ?? true);
+        setAutoSubtitles(draft.autoSubtitles ?? true);
         setSubtitleSize(draft.subtitleSize ?? 'Medium');
         setSubtitlePosition(draft.subtitlePosition ?? 'Bottom');
         setVoice(draft.voice ?? 'Ava (Neutral)');
@@ -273,6 +275,7 @@ export default function VideoStudio() {
     }
     if (typeof input.caption === 'string') setCaption(input.caption);
     setShowSubtitles(input.showSubtitles !== false);
+    setAutoSubtitles(input.autoSubtitles !== false);
     if (input.subtitleSize) setSubtitleSize(input.subtitleSize);
     if (input.subtitlePosition) setSubtitlePosition(input.subtitlePosition);
     if (input.transition) setTransition(input.transition);
@@ -312,6 +315,7 @@ export default function VideoStudio() {
         caption,
         scriptText,
         showSubtitles,
+        autoSubtitles,
         subtitleSize,
         subtitlePosition,
         voice,
@@ -544,6 +548,7 @@ export default function VideoStudio() {
         })),
         caption,
         showSubtitles,
+        autoSubtitles,
         subtitleSize,
         subtitlePosition,
         transition,
@@ -1044,6 +1049,19 @@ export default function VideoStudio() {
                 </button>
               </div>
               <div className="side-meta" style={{ marginBottom: 6 }}>
+                <span>Subtitle otomatis</span>
+                <button
+                  className={autoSubtitles ? 'btn sm' : 'btn ghost sm'}
+                  onClick={() => setAutoSubtitles(value => !value)}
+                >
+                  {autoSubtitles && <Check size={12} />}
+                  {autoSubtitles ? 'Aktif' : 'Nonaktif'}
+                </button>
+              </div>
+              <p className="muted" style={{ fontSize: 11, marginTop: 0, marginBottom: 12 }}>
+                Timing mengikuti voiceover, ikut dibakar ke video, dan bisa diunduh sebagai SRT.
+              </p>
+              <div className="side-meta" style={{ marginBottom: 6 }}>
                 <span>Ukuran</span>
                 <span>{subtitleSize}</span>
               </div>
@@ -1362,6 +1380,16 @@ export default function VideoStudio() {
                       >
                         Buka
                       </a>
+                      {item.metadata?.subtitles?.url && (
+                        <a
+                          href={item.metadata.subtitles.url}
+                          className="card-link"
+                          download={`${item.jobId}.srt`}
+                          title="Unduh subtitle SRT"
+                        >
+                          SRT
+                        </a>
+                      )}
                     </div>
                   ) : (
                     <span className="muted">belum tersedia</span>
@@ -1390,7 +1418,7 @@ export default function VideoStudio() {
             ))}
             {renders.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted" style={{ textAlign: 'center', padding: '18px 8px' }}>
+                <td colSpan={6} className="muted" style={{ textAlign: 'center', padding: '18px 8px' }}>
                   Belum ada render. Klik Export Video untuk mencoba.
                 </td>
               </tr>

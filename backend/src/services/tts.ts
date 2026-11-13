@@ -80,30 +80,119 @@ export async function synthesizeSpeech(options: SpeechOptions) {
 
   await fs.mkdir(CACHE_DIR, { recursive: true });
   const file = path.join(CACHE_DIR, `${hash}.mp3`);
-  if (existsSync(file)) {
+  const subtitleFile = path.join(CACHE_DIR, `${hash}.srt`);
+  if (existsSync(file) && existsSync(subtitleFile)) {
     try {
       const stat = await fs.stat(file);
-      if (stat.size > 512) return { file, voice: edgeVoice, rate, pitch, cached: true };
+      if (stat.size > 512) return { file, subtitleFile, voice: edgeVoice, rate, pitch, cached: true };
     } catch {
       // regenerate below
     }
   }
 
   const partial = `${file}.part`;
+  const partialSubtitle = `${subtitleFile}.part`;
   try {
     await execFileAsync(
       TTS_BIN,
-      ['--voice', edgeVoice, '--text', text, `--rate=${rate}`, `--pitch=${pitch}`, '--write-media', partial],
+      [
+        '--voice', edgeVoice,
+        '--text', text,
+        `--rate=${rate}`,
+        `--pitch=${pitch}`,
+        '--write-media', partial,
+        '--write-subtitles', partialSubtitle,
+      ],
       { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }
     );
     const stat = await fs.stat(partial);
     if (stat.size < 512) throw new Error('TTS menghasilkan audio kosong');
     await fs.rename(partial, file);
-    return { file, voice: edgeVoice, rate, pitch, cached: false };
+
+    let savedSubtitle: string | null = null;
+    try {
+      const subStat = await fs.stat(partialSubtitle);
+      if (subStat.size > 10) {
+        await fs.rename(partialSubtitle, subtitleFile);
+        savedSubtitle = subtitleFile;
+      }
+    } catch {
+      // subtitles are optional
+    }
+    return { file, subtitleFile: savedSubtitle, voice: edgeVoice, rate, pitch, cached: false };
   } catch (error) {
     await fs.rm(partial, { force: true }).catch(() => undefined);
+    await fs.rm(partialSubtitle, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+function formatTimestamp(milliseconds: number) {
+  const value = Math.max(0, Math.round(milliseconds));
+  const hours = Math.floor(value / 3600000);
+  const minutes = Math.floor((value % 3600000) / 60000);
+  const seconds = Math.floor((value % 60000) / 1000);
+  const millis = value % 1000;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(
+    seconds
+  ).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
+}
+
+// TTS cues are relative to the original MP3. Rendered narration is sped up by
+// `tempo` and delayed 250 ms, so cue timings have to follow the same transform.
+export function shiftSubtitles(
+  content: string,
+  tempo: number,
+  delaySeconds: number,
+  maxSeconds: number
+) {
+  const factor = tempo > 0 ? tempo : 1;
+  const limit = Math.max(1, maxSeconds) * 1000;
+  const blocks: string[][] = [];
+  let current: string[] = [];
+
+  for (const line of content.replace(/\r/g, '').split('\n')) {
+    if (line.trim()) {
+      current.push(line);
+    } else if (current.length) {
+      blocks.push(current);
+      current = [];
+    }
+  }
+  if (current.length) blocks.push(current);
+
+  const output: string[] = [];
+  let index = 1;
+  const pattern =
+    /(\d{2}):(\d{2}):(\d{2}),(\d{3})\s+-->\s+(\d{2}):(\d{2}):(\d{2}),(\d{3})/;
+
+  for (const block of blocks) {
+    const timeLine = block[0].includes('-->') ? block[0] : block[1];
+    const match = timeLine?.match(pattern);
+    if (!match) continue;
+    const start =
+      ((Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])) * 1000 +
+        Number(match[4])) /
+        factor +
+      delaySeconds * 1000;
+    const end =
+      ((Number(match[5]) * 3600 + Number(match[6]) * 60 + Number(match[7])) * 1000 +
+        Number(match[8])) /
+        factor +
+      delaySeconds * 1000;
+    const clampedEnd = Math.min(end, limit);
+    if (start >= limit || clampedEnd <= start) continue;
+
+    const textStart = block[0].includes('-->') ? 1 : 2;
+    output.push(
+      String(index++),
+      `${formatTimestamp(start)} --> ${formatTimestamp(clampedEnd)}`,
+      ...block.slice(textStart),
+      ''
+    );
+  }
+
+  return output.join('\n');
 }
 
 export async function probeDuration(file: string) {
