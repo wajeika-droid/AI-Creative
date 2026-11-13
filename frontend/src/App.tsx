@@ -138,20 +138,6 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
       <div className="main">
         <header className="topbar">
-          <div className="topbar-tabs">
-            <NavLink to="/" end className={({ isActive }) => `topbar-tab${isActive ? ' active' : ''}`}>
-              Dashboard
-            </NavLink>
-            <NavLink to="/affiliate" className={({ isActive }) => `topbar-tab${isActive ? ' active' : ''}`}>
-              Stats
-            </NavLink>
-            <NavLink to="/content" className={({ isActive }) => `topbar-tab${isActive ? ' active' : ''}`}>
-              Creative
-            </NavLink>
-            <NavLink to="/subscription" className={({ isActive }) => `topbar-tab${isActive ? ' active' : ''}`}>
-              Account
-            </NavLink>
-          </div>
           <div className="topbar-right">
             <div className="status-pill">
               <span className="dot" />
