@@ -1,54 +1,79 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { z } from 'zod';
+import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/auth';
 import { rbac } from '../middleware/rbac';
-import { z } from 'zod';
 
 const router = Router();
-const prisma = new PrismaClient();
+
+const withdrawSchema = z.object({
+  amount: z
+    .string()
+    .regex(/^\d+(\.\d{1,2})?$/)
+    .refine(value => Number(value) >= 1 && Number(value) <= 1_000_000_000, {
+      message: 'Jumlah withdraw tidak valid',
+    }),
+  bankAccount: z.string().trim().min(4).max(120),
+});
+
+async function ensureWallet(userId: string) {
+  return prisma.wallet.upsert({ where: { userId }, update: {}, create: { userId } });
+}
+
+router.get('/', authenticate, async (req: Request, res: Response) => {
+  const userId = (req as any).user.id;
+  const wallet = await ensureWallet(userId);
+  const [transactions, payouts] = await Promise.all([
+    prisma.transaction.findMany({ where: { walletId: wallet.id }, orderBy: { createdAt: 'desc' }, take: 50 }),
+    prisma.payout.findMany({ where: { walletId: wallet.id }, orderBy: { requestedAt: 'desc' }, take: 20 }),
+  ]);
+  res.json({ ...wallet, transactions, payouts });
+});
 
 router.get('/balance', authenticate, async (req: Request, res: Response) => {
   const userId = (req as any).user.id;
-  const wallet = await prisma.wallet.findUnique({ where: { userId } });
-  res.json(wallet);
+  res.json(await ensureWallet(userId));
 });
 
 router.post('/withdraw', authenticate, rbac('request_withdraw'), async (req: Request, res: Response) => {
-  const schema = z.object({
-    amount: z.string().regex(/^\d+(\.\d{1,2})?$/),
-    bankAccount: z.string(),
-  });
-  const parse = schema.safeParse(req.body);
+  const parse = withdrawSchema.safeParse(req.body);
   if (!parse.success) return res.status(400).json({ error: 'Invalid input', details: parse.error.format() });
 
-  const { amount, bankAccount } = parse.data;
   const userId = (req as any).user.id;
+  const amount = new Prisma.Decimal(parse.data.amount);
 
-  const wallet = await prisma.wallet.findUniqueOrThrow({ where: { userId } });
-  if (Number(wallet.balance) < Number(amount)) {
-    return res.status(400).json({ error: 'Saldo tidak cukup' });
-  }
-
-  await prisma.$transaction([
-    prisma.wallet.update({
-      where: { userId },
-      data: {
-        balance: { decrement: Number(amount) },
-        pending: { increment: Number(amount) },
-      },
-    }),
-    prisma.payout.create({
+  const payout = await prisma.$transaction(async tx => {
+    const updated = await tx.wallet.updateMany({
+      where: { userId, balance: { gte: amount } },
+      data: { balance: { decrement: amount }, pending: { increment: amount } },
+    });
+    if (updated.count === 0) {
+      const err: any = new Error('Saldo tidak cukup');
+      err.status = 400;
+      throw err;
+    }
+    const wallet = await tx.wallet.findUniqueOrThrow({ where: { userId } });
+    const record = await tx.payout.create({
       data: {
         walletId: wallet.id,
-        amount: Number(amount),
+        amount,
         status: 'pending',
-        note: `Bank account: ${bankAccount}`,
+        note: `Bank account: ${parse.data.bankAccount}`,
       },
-    }),
-  ]);
+    });
+    await tx.transaction.create({
+      data: {
+        walletId: wallet.id,
+        amount: amount.negated(),
+        type: 'withdraw_request',
+        note: `Payout ${record.id} · ${parse.data.bankAccount}`,
+      },
+    });
+    return record;
+  });
 
-  res.json({ message: 'Permintaan pencairan diterima, menunggu verifikasi' });
+  res.json({ message: 'Permintaan pencairan diterima, menunggu verifikasi', payoutId: payout.id });
 });
 
 export default router;
-

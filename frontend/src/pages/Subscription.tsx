@@ -40,7 +40,7 @@ export default function Subscription() {
     }
   }
 
-  const usedTokens = data?.usage?.reduce((sum: number, item: any) => sum + item.usedTokens, 0) ?? 0;
+  const usedTokens = Number(data?.usedTokens ?? 0);
 
   return (
     <>

@@ -47,8 +47,24 @@ app.use((_req, res) => {
 });
 
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('Unhandled error:', err);
-  res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+  if (err?.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Body JSON tidak valid' });
+  }
+  if (err?.code === 'P2002') {
+    return res.status(409).json({ error: 'Data sudah ada (duplikat)' });
+  }
+  if (err?.code === 'P2025') {
+    return res.status(404).json({ error: 'Data tidak ditemukan' });
+  }
+  if (err?.code === 'P2003') {
+    return res.status(400).json({ error: 'Relasi data tidak valid' });
+  }
+  const status = Number(err?.status) || 500;
+  if (status >= 500) {
+    console.error('Unhandled error:', err);
+    return res.status(status).json({ error: 'Internal server error' });
+  }
+  res.status(status).json({ error: err.message || 'Permintaan gagal' });
 });
 
 app.listen(port, () => {

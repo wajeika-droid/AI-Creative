@@ -92,7 +92,7 @@ export default function Dashboard() {
           label="Video dirender"
           value={formatNumber(summary?.totalVideo)}
           icon={Clapperboard}
-          values={series.map(item => item.conversions)}
+          values={series.map(item => item.video ?? 0)}
           id="video"
           tone="amber"
           foot={<span className="chip neutral">AI worker</span>}

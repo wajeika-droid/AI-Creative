@@ -4,8 +4,8 @@ import { ArrowRight, Lock, Mail, Sparkles } from 'lucide-react';
 import { api, errorMessage } from '../api';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
-  const [email, setEmail] = useState('admin@cpai.com');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -76,7 +76,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           </button>
         </form>
         <p className="muted" style={{ marginTop: 16 }}>
-          Default super admin: admin@cpai.com / admin123
+          Gunakan akun yang diberikan admin workspace Anda.
         </p>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api, errorMessage } from '../api';
-import { PageHead } from '../components/ui';
+import { EmptyRow, PageHead, formatMoney } from '../components/ui';
 
 export default function Wallet() {
   const [wallet, setWallet] = useState<any>(null);
@@ -11,7 +11,7 @@ export default function Wallet() {
 
   const load = () =>
     api
-      .get('/wallet/balance')
+      .get('/wallet')
       .then(response => setWallet(response.data))
       .catch(err => setError(errorMessage(err)));
 
@@ -38,17 +38,17 @@ export default function Wallet() {
 
   return (
     <>
-      <PageHead title="Wallet" subtitle="Saldo komisi dan permintaan pencairan." />
+      <PageHead title="Wallet" subtitle="Saldo komisi, riwayat transaksi, dan permintaan pencairan." />
       {error && <div className="alert error">{error}</div>}
       {message && <div className="alert ok">{message}</div>}
       <div className="grid" style={{ marginBottom: 22 }}>
         <div className="card">
           <div className="stat-label">Saldo</div>
-          <div className="stat-value">{Number(wallet?.balance ?? 0).toLocaleString('id-ID')}</div>
+          <div className="stat-value">{formatMoney(wallet?.balance)}</div>
         </div>
         <div className="card">
           <div className="stat-label">Pending</div>
-          <div className="stat-value">{Number(wallet?.pending ?? 0).toLocaleString('id-ID')}</div>
+          <div className="stat-value">{formatMoney(wallet?.pending)}</div>
         </div>
       </div>
       <form className="panel" onSubmit={submit}>
@@ -69,6 +69,7 @@ export default function Wallet() {
               value={form.bankAccount}
               onChange={e => setForm({ ...form, bankAccount: e.target.value })}
               required
+              minLength={4}
             />
           </div>
         </div>
@@ -76,6 +77,69 @@ export default function Wallet() {
           {loading ? 'Mengirim...' : 'Ajukan withdraw'}
         </button>
       </form>
+
+      <div className="panel">
+        <h3>Riwayat transaksi</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Tipe</th>
+              <th>Jumlah</th>
+              <th>Catatan</th>
+              <th>Waktu</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(wallet?.transactions ?? []).map((trx: any) => (
+              <tr key={trx.id}>
+                <td>{trx.type}</td>
+                <td style={{ color: Number(trx.amount) >= 0 ? 'var(--green)' : 'var(--amber)' }}>
+                  {Number(trx.amount) >= 0 ? '+' : ''}
+                  {formatMoney(trx.amount)}
+                </td>
+                <td className="muted">{trx.note || '-'}</td>
+                <td>{new Date(trx.createdAt).toLocaleString('id-ID')}</td>
+              </tr>
+            ))}
+            {(wallet?.transactions ?? []).length === 0 && (
+              <EmptyRow colSpan={4} text="Belum ada transaksi." />
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="panel">
+        <h3>Riwayat pencairan</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Jumlah</th>
+              <th>Status</th>
+              <th>Diajukan</th>
+              <th>Diproses</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(wallet?.payouts ?? []).map((payout: any) => (
+              <tr key={payout.id}>
+                <td>{formatMoney(payout.amount)}</td>
+                <td>
+                  <span className={`badge ${payout.status === 'paid' ? 'ok' : payout.status === 'rejected' ? 'failed' : 'pending'}`}>
+                    {payout.status}
+                  </span>
+                </td>
+                <td>{new Date(payout.requestedAt).toLocaleString('id-ID')}</td>
+                <td className="muted">
+                  {payout.processedAt ? new Date(payout.processedAt).toLocaleString('id-ID') : '-'}
+                </td>
+              </tr>
+            ))}
+            {(wallet?.payouts ?? []).length === 0 && (
+              <EmptyRow colSpan={4} text="Belum ada permintaan pencairan." />
+            )}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }

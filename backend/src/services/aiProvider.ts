@@ -1,8 +1,6 @@
-import { Queue, Worker } from 'bullmq';
+import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 const connection = new IORedis(process.env.REDIS_URL || 'redis://redis:6379', {
   maxRetriesPerRequest: null,
@@ -17,18 +15,43 @@ type SubmitParams = {
   input: unknown;
 };
 
+export async function assertQuota(userId: string) {
+  const subscription = await prisma.subscription.findUnique({ where: { userId } });
+  if (!subscription) return;
+  if (subscription.endDate && subscription.endDate < new Date()) {
+    const err: any = new Error('Langganan sudah berakhir, perpanjang paket terlebih dahulu');
+    err.status = 402;
+    throw err;
+  }
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const usage = await prisma.tokenUsage.aggregate({
+    where: { userId, date: { gte: monthStart } },
+    _sum: { usedTokens: true },
+  });
+  if ((usage._sum.usedTokens ?? 0) >= subscription.tokenQuota) {
+    const err: any = new Error('Kuota token bulanan habis, upgrade paket untuk melanjutkan');
+    err.status = 429;
+    throw err;
+  }
+}
+
 export async function submitAIJob(params: SubmitParams) {
   let provider = params.providerId
-    ? await prisma.aIProvider.findUnique({ where: { id: params.providerId } })
+    ? await prisma.aIProvider.findFirst({ where: { id: params.providerId, enabled: true } })
     : null;
 
   if (!provider) {
     const kind = params.type.includes('video') ? 'video' : 'text';
-    provider = await prisma.aIProvider.findFirst({ where: { enabled: true, type: kind } });
+    provider = await prisma.aIProvider.findFirst({
+      where: { enabled: true, type: kind },
+      orderBy: { name: 'asc' },
+    });
   }
 
   if (!provider) {
-    const err: any = new Error('No AI provider configured');
+    const err: any = new Error('Belum ada AI provider aktif');
     err.status = 503;
     throw err;
   }
@@ -52,72 +75,14 @@ export async function submitAIJob(params: SubmitParams) {
       type: params.type,
       input: params.input,
     },
-    { jobId: record.id }
+    {
+      jobId: record.id,
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 2000 },
+      removeOnComplete: { age: 3600, count: 500 },
+      removeOnFail: { age: 86400, count: 500 },
+    }
   );
 
   return record;
 }
-
-async function processJob(data: any) {
-  const { jobId, userId, providerId, type, input } = data;
-  const provider = await prisma.aIProvider.findUniqueOrThrow({ where: { id: providerId } });
-  const config = (provider.config || {}) as any;
-
-  await prisma.aIJob.update({ where: { id: jobId }, data: { status: 'running' } });
-
-  let output: any;
-  if (config.endpoint) {
-    const response = await fetch(config.endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
-      },
-      body: JSON.stringify({ type, input }),
-    });
-    if (!response.ok) {
-      throw new Error(`Provider responded with ${response.status}`);
-    }
-    output = await response.json();
-  } else {
-    output = { mock: true, type, echoedInput: input, generatedAt: new Date().toISOString() };
-  }
-
-  await prisma.aIJob.update({ where: { id: jobId }, data: { status: 'success', output } });
-
-  if (type.includes('video')) {
-    await prisma.generatedVideo.create({
-      data: {
-        userId,
-        jobId,
-        url: output.url || `http://localhost:9000/creative/mock-${jobId}.mp4`,
-        metadata: output.metadata ?? output,
-      },
-    });
-  } else {
-    await prisma.generatedContent.create({
-      data: { userId, jobId, content: output },
-    });
-  }
-
-  return output;
-}
-
-export const aiWorker = new Worker(
-  'ai-jobs',
-  async job => {
-    try {
-      const result = await processJob(job.data);
-      return result;
-    } catch (err) {
-      await prisma.aIJob
-        .update({ where: { id: job.data.jobId }, data: { status: 'failed' } })
-        .catch(() => undefined);
-      throw err;
-    }
-  },
-  { connection }
-);
-
-aiWorker.on('completed', job => console.log(`Job ${job.id} selesai`));
-aiWorker.on('failed', (job, err) => console.error(`Job ${job?.id} gagal`, err));

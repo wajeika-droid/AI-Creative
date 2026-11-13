@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   BrowserRouter,
   Navigate,
@@ -8,7 +8,6 @@ import {
   Routes,
 } from 'react-router-dom';
 import {
-  Bell,
   Clapperboard,
   CreditCard,
   LayoutDashboard,
@@ -22,6 +21,7 @@ import {
   Workflow,
   Wand2,
 } from 'lucide-react';
+import { api } from './api';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import ContentStudio from './pages/ContentStudio';
@@ -33,6 +33,7 @@ import WorkflowBuilder from './pages/WorkflowBuilder';
 import Subscription from './pages/Subscription';
 import Wallet from './pages/Wallet';
 import AdminPanel from './pages/AdminPanel';
+import ReferralLanding from './pages/ReferralLanding';
 
 const menuMain = [
   { to: '/', label: 'Overview', icon: LayoutDashboard },
@@ -46,11 +47,11 @@ const menuGrowth = [
   { to: '/team', label: 'Tim', icon: Users },
 ];
 
-const menuWorkspace = [
+const menuWorkspace: { to: string; label: string; icon: any; adminOnly?: boolean }[] = [
   { to: '/content', label: 'Content Studio', icon: Wand2 },
   { to: '/subscription', label: 'Langganan', icon: CreditCard },
   { to: '/wallet', label: 'Wallet', icon: Wallet2 },
-  { to: '/admin', label: 'Admin Panel', icon: ShieldCheck },
+  { to: '/admin', label: 'Admin Panel', icon: ShieldCheck, adminOnly: true },
 ];
 
 function NavItem({
@@ -80,6 +81,22 @@ function NavItem({
 function Shell({ onLogout }: { onLogout: () => void }) {
   const user = JSON.parse(localStorage.getItem('cpai_user') || '{}');
   const initials = (user.email || 'CP').slice(0, 2).toUpperCase();
+  const [sub, setSub] = useState<any>(null);
+
+  useEffect(() => {
+    api
+      .get('/subscription')
+      .then(response => setSub(response.data))
+      .catch(() => setSub(null));
+  }, []);
+
+  const plan = sub?.subscription?.plan ?? 'Free';
+  const quota = Number(sub?.subscription?.tokenQuota ?? 0);
+  const used = Number(sub?.usedTokens ?? 0);
+  const percent = quota > 0 ? Math.min(100, Math.round((used / quota) * 100)) : 0;
+  const workspace = menuWorkspace.filter(
+    item => !item.adminOnly || !user.role?.name || user.role.name === 'Super Admin'
+  );
 
   return (
     <div className="app">
@@ -105,22 +122,26 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         ))}
 
         <div className="side-label">Workspace</div>
-        {menuWorkspace.map(item => (
-          <NavItem key={item.to} {...item} />
+        {workspace.map(item => (
+          <NavItem key={item.to} to={item.to} label={item.label} icon={item.icon} />
         ))}
 
         <div className="plan-card">
           <div className="plan-label">Your plan</div>
-          <div className="plan-name">Studio Pro</div>
+          <div className="plan-name">{plan}</div>
           <div className="plan-limit">
-            <span>Monthly limit</span>
-            <span>72%</span>
+            <span>
+              {quota > 0
+                ? `${used.toLocaleString('id-ID')} / ${quota.toLocaleString('id-ID')} token`
+                : 'Tanpa kuota'}
+            </span>
+            <span>{percent}%</span>
           </div>
           <div className="plan-bar">
-            <span style={{ width: '72%' }} />
+            <span style={{ width: `${percent}%` }} />
           </div>
           <NavLink to="/subscription" className="btn sm">
-            Upgrade Plan
+            {plan === 'Agency' ? 'Kelola paket' : 'Upgrade Plan'}
           </NavLink>
         </div>
 
@@ -128,7 +149,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           <div className="avatar">{initials}</div>
           <div className="user-meta">
             <div className="user-email">{user.email || 'Pengguna'}</div>
-            <div className="user-role">Creator workspace</div>
+            <div className="user-role">{user.role?.name ?? 'Creator workspace'}</div>
           </div>
           <button className="icon-btn" onClick={onLogout} title="Logout">
             <LogOut size={15} />
@@ -143,9 +164,6 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <span className="dot" />
               API connected
             </div>
-            <button className="icon-btn" title="Notifikasi">
-              <Bell size={15} />
-            </button>
             <div className="avatar" style={{ width: 32, height: 32 }}>
               {initials}
             </div>
@@ -181,6 +199,7 @@ export default function App() {
             )
           }
         />
+        <Route path="/r/:token" element={<ReferralLanding />} />
         <Route
           element={
             token ? <Shell onLogout={logout} /> : <Navigate to="/login" replace />

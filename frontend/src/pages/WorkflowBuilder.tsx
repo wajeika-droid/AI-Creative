@@ -186,7 +186,7 @@ export default function WorkflowBuilder() {
                 window.setTimeout(() => setMessage(''), 3000);
               }}
             >
-              <Play size={14} /> Run
+              <Play size={14} /> Simulasi run
             </button>
             <button className="btn" onClick={() => saveWorkflow()} disabled={loading}>
               <Save size={14} /> {loading ? 'Menyimpan...' : 'Save workflow'}

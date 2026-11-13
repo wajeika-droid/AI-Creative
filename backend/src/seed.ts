@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
-
-const prisma = new PrismaClient();
+import { prisma } from './lib/prisma';
 
 const allPermissions = [
   'view_dashboard',
@@ -58,8 +56,6 @@ const permissionsMap: Record<string, string[]> = {
   ],
 };
 
-const roles = Object.keys(permissionsMap);
-
 async function main() {
   for (const perm of allPermissions) {
     await prisma.permission.upsert({
@@ -69,7 +65,7 @@ async function main() {
     });
   }
 
-  for (const roleName of roles) {
+  for (const roleName of Object.keys(permissionsMap)) {
     const permObjs = await prisma.permission.findMany({
       where: { name: { in: permissionsMap[roleName] } },
     });
@@ -97,11 +93,11 @@ async function main() {
   }
 
   const adminEmail = 'admin@cpai.com';
-  const existing = await prisma.user.findUnique({ where: { email: adminEmail } });
-  if (!existing) {
+  let admin = await prisma.user.findUnique({ where: { email: adminEmail } });
+  if (!admin) {
     const hash = await bcrypt.hash('admin123', 12);
     const superAdminRole = await prisma.role.findUniqueOrThrow({ where: { name: 'Super Admin' } });
-    await prisma.user.create({
+    admin = await prisma.user.create({
       data: {
         email: adminEmail,
         passwordHash: hash,
@@ -112,6 +108,46 @@ async function main() {
     console.log('Super Admin user created (admin@cpai.com / admin123)');
   } else {
     console.log('Super Admin user already exists');
+  }
+
+  await prisma.wallet.upsert({ where: { userId: admin.id }, update: {}, create: { userId: admin.id } });
+
+  const endDate = new Date();
+  endDate.setFullYear(endDate.getFullYear() + 1);
+  await prisma.subscription.upsert({
+    where: { userId: admin.id },
+    update: {},
+    create: { userId: admin.id, plan: 'Professional', tokenQuota: 200000, endDate },
+  });
+
+  let campaign = await prisma.campaign.findFirst({
+    where: { advertiserId: admin.id, name: 'Demo Campaign' },
+  });
+  if (!campaign) {
+    campaign = await prisma.campaign.create({
+      data: {
+        advertiserId: admin.id,
+        name: 'Demo Campaign',
+        budget: 5000000,
+        commissionRate: 10,
+      },
+    });
+    console.log('Demo campaign created');
+  }
+
+  const demoProduct = await prisma.product.findFirst({
+    where: { campaignId: campaign.id, name: 'Demo Produk Digital' },
+  });
+  if (!demoProduct) {
+    await prisma.product.create({
+      data: {
+        campaignId: campaign.id,
+        name: 'Demo Produk Digital',
+        price: 150000,
+        affiliateCommission: 15000,
+      },
+    });
+    console.log('Demo product created');
   }
 }
 

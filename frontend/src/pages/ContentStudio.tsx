@@ -1,6 +1,7 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
+import { RefreshCcw } from 'lucide-react';
 import { api, errorMessage } from '../api';
-import { PageHead } from '../components/ui';
+import { EmptyRow, PageHead } from '../components/ui';
 
 const types = [
   'idea',
@@ -15,6 +16,8 @@ const types = [
   'educational',
 ];
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export default function ContentStudio() {
   const [form, setForm] = useState({
     niche: 'Kecantikan',
@@ -28,8 +31,19 @@ export default function ContentStudio() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState<any[]>([]);
 
   const update = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
+
+  const loadResults = () =>
+    api
+      .get('/content')
+      .then(response => setItems(response.data))
+      .catch(() => setItems([]));
+
+  useEffect(() => {
+    loadResults();
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -41,7 +55,21 @@ export default function ContentStudio() {
         ...form,
         duration: Number(form.duration),
       });
-      setMessage(`Job AI dikirim (ID: ${data.jobId}). Hasil diproses worker dan tersimpan otomatis.`);
+      setMessage(`Job AI dikirim (ID: ${data.jobId}). Menunggu worker memproses…`);
+
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await sleep(1500);
+        const { data: job } = await api.get(`/content/jobs/${data.jobId}`);
+        if (job.status === 'success') {
+          setMessage('Konten berhasil dibuat dan tersimpan.');
+          break;
+        }
+        if (job.status === 'failed') {
+          setError('Job AI gagal diproses. Periksa provider lalu coba lagi.');
+          break;
+        }
+      }
+      loadResults();
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -54,6 +82,11 @@ export default function ContentStudio() {
       <PageHead
         title="Content Studio"
         subtitle="Generate ide, script, caption dan materi konten dengan AI."
+        actions={
+          <button className="btn ghost" onClick={loadResults}>
+            <RefreshCcw size={14} /> Refresh hasil
+          </button>
+        }
       />
       {error && <div className="alert error">{error}</div>}
       {message && <div className="alert ok">{message}</div>}
@@ -101,9 +134,42 @@ export default function ContentStudio() {
           </div>
         </div>
         <button type="submit" disabled={loading}>
-          {loading ? 'Mengirim...' : 'Generate konten'}
+          {loading ? 'Memproses…' : 'Generate konten'}
         </button>
       </form>
+
+      <div className="panel">
+        <h3>Hasil terbaru</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Jenis</th>
+              <th>Provider</th>
+              <th>Status</th>
+              <th>Dibuat</th>
+              <th>Output</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map(item => (
+              <tr key={item.id}>
+                <td>{item.job?.type || 'text_generation'}</td>
+                <td>{item.job?.provider?.name || '-'}</td>
+                <td>
+                  <span className={`badge ${item.job?.status === 'success' ? 'ok' : item.job?.status === 'failed' ? 'failed' : 'pending'}`}>
+                    {item.job?.status || 'success'}
+                  </span>
+                </td>
+                <td>{new Date(item.createdAt).toLocaleString('id-ID')}</td>
+                <td className="muted" style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {typeof item.content === 'string' ? item.content : JSON.stringify(item.content)}
+                </td>
+              </tr>
+            ))}
+            {items.length === 0 && <EmptyRow colSpan={5} text="Belum ada konten yang dihasilkan." />}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }

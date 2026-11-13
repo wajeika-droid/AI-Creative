@@ -1,10 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/auth';
 import { rbac } from '../middleware/rbac';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 router.get('/summary', authenticate, rbac('view_dashboard'), async (req: Request, res: Response) => {
   const userId = (req as any).user.id;
@@ -35,8 +34,12 @@ router.get('/series', authenticate, rbac('view_dashboard'), async (req: Request,
   since.setHours(0, 0, 0, 0);
   since.setDate(since.getDate() - 13);
 
-  const [contents, clicks, conversions, commissions] = await Promise.all([
+  const [contents, videos, clicks, conversions, commissions] = await Promise.all([
     prisma.generatedContent.findMany({
+      where: { userId, createdAt: { gte: since } },
+      select: { createdAt: true },
+    }),
+    prisma.generatedVideo.findMany({
       where: { userId, createdAt: { gte: since } },
       select: { createdAt: true },
     }),
@@ -46,7 +49,7 @@ router.get('/series', authenticate, rbac('view_dashboard'), async (req: Request,
     }),
     prisma.conversion.findMany({
       where: { affiliateLink: { creatorId: userId }, createdAt: { gte: since } },
-      select: { createdAt: true, amount: true },
+      select: { createdAt: true },
     }),
     prisma.commission.findMany({
       where: { userId, createdAt: { gte: since } },
@@ -60,6 +63,7 @@ router.get('/series', authenticate, rbac('view_dashboard'), async (req: Request,
     return {
       date: date.toISOString().slice(0, 10),
       content: 0,
+      video: 0,
       clicks: 0,
       conversions: 0,
       commission: 0,
@@ -72,16 +76,17 @@ router.get('/series', authenticate, rbac('view_dashboard'), async (req: Request,
     const bucket = byDate.get(key(item.createdAt));
     if (bucket) bucket.content += 1;
   });
+  videos.forEach(item => {
+    const bucket = byDate.get(key(item.createdAt));
+    if (bucket) bucket.video += 1;
+  });
   clicks.forEach(item => {
     const bucket = byDate.get(key(item.createdAt));
     if (bucket) bucket.clicks += 1;
   });
   conversions.forEach(item => {
     const bucket = byDate.get(key(item.createdAt));
-    if (bucket) {
-      bucket.conversions += 1;
-      bucket.commission += Number(item.amount);
-    }
+    if (bucket) bucket.conversions += 1;
   });
   commissions.forEach(item => {
     const bucket = byDate.get(key(item.createdAt));
@@ -103,4 +108,3 @@ router.get('/recent', authenticate, rbac('view_dashboard'), async (req: Request,
 });
 
 export default router;
-

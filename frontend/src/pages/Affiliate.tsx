@@ -23,6 +23,7 @@ export default function Affiliate() {
   const [stats, setStats] = useState<any>(null);
   const [links, setLinks] = useState<any[]>([]);
   const [series, setSeries] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [productId, setProductId] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -42,6 +43,13 @@ export default function Affiliate() {
       .get('/dashboard/series')
       .then(response => setSeries(response.data))
       .catch(() => setSeries([]));
+    api
+      .get('/affiliate/products')
+      .then(response => {
+        setProducts(response.data);
+        setProductId(current => current || response.data[0]?.id || '');
+      })
+      .catch(() => setProducts([]));
   };
 
   useEffect(() => {
@@ -55,9 +63,12 @@ export default function Affiliate() {
     setMessage('');
     try {
       const { data } = await api.post('/affiliate/register', { productId });
-      setMessage(`Link affiliate dibuat untuk product ${productId}.`);
-      setProductId('');
-      setCopied(data.id);
+      const product = products.find(item => item.id === productId);
+      setMessage(
+        data.existing
+          ? `Anda sudah punya link untuk ${product?.name || 'produk ini'}.`
+          : `Link affiliate dibuat untuk ${product?.name || 'produk'}. Bagikan link referral Anda.`
+      );
       loadAll();
     } catch (err) {
       setError(errorMessage(err));
@@ -156,7 +167,7 @@ export default function Affiliate() {
           </div>
           {links.length === 0 ? (
             <div className="muted">
-              Belum ada link. Buat link pertama Anda dengan memasukkan Product ID di form bawah.
+              Belum ada link. Pilih produk di form bawah untuk membuat link referral pertama Anda.
             </div>
           ) : (
             <>
@@ -172,6 +183,9 @@ export default function Affiliate() {
                   {copied === links[0].id ? 'Tersalin' : 'Copy'}
                 </button>
               </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                Bagikan link ini — setiap klik dan konversi tercatat otomatis.
+              </div>
               <div className="stat-foot" style={{ marginTop: 14 }}>
                 <span className="chip neutral">{links[0].product?.name || 'Produk affiliate'}</span>
                 <span className="chip up">{links[0]._count?.clicks ?? 0} klik</span>
@@ -182,15 +196,31 @@ export default function Affiliate() {
           <div style={{ borderTop: '1px solid #171c2a', margin: '16px 0', paddingTop: 16 }}>
             <form onSubmit={submit}>
               <div className="form-row" style={{ marginBottom: 10 }}>
-                <label>Product ID untuk link baru</label>
-                <input
-                  value={productId}
-                  onChange={event => setProductId(event.target.value)}
-                  placeholder="UUID produk campaign"
-                  required
-                />
+                <label>Produk untuk link baru</label>
+                {products.length === 0 ? (
+                  <div className="muted">
+                    Belum ada produk aktif. <Link to="/advertiser">Buat campaign & produk</Link> terlebih dahulu.
+                  </div>
+                ) : (
+                  <select
+                    value={productId}
+                    onChange={event => setProductId(event.target.value)}
+                    required
+                  >
+                    {products.map(product => (
+                      <option key={product.id} value={product.id}>
+                        {product.name} · {product.campaign?.name || 'Campaign'}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
-              <button className="btn sm" type="submit" disabled={loading} style={{ width: '100%' }}>
+              <button
+                className="btn sm"
+                type="submit"
+                disabled={loading || products.length === 0}
+                style={{ width: '100%' }}
+              >
                 <Plus size={14} /> {loading ? 'Mendaftarkan...' : 'Buat link affiliate'}
               </button>
             </form>

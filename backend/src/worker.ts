@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { aiWorker } from './services/aiProvider';
+import { aiWorker } from './services/aiWorker';
 
 console.log('AI worker started, waiting for jobs...');
 

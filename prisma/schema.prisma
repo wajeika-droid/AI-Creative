@@ -63,11 +63,14 @@ model AdvertiserProfile {
 }
 
 model Team {
-  id          String @id @default(uuid())
+  id          String   @id @default(uuid())
   name        String
   ownerId     String
-  owner       User   @relation(fields: [ownerId], references: [id])
+  createdAt   DateTime @default(now())
+  owner       User     @relation(fields: [ownerId], references: [id])
   members     TeamMember[]
+
+  @@index([ownerId])
 }
 
 model TeamMember {
@@ -77,6 +80,9 @@ model TeamMember {
   role      String
   team      Team   @relation(fields: [teamId], references: [id])
   user      User   @relation(fields: [userId], references: [id])
+
+  @@unique([teamId, userId])
+  @@index([userId])
 }
 
 model Campaign {
@@ -91,6 +97,8 @@ model Campaign {
   updatedAt        DateTime @updatedAt
   advertiser       User     @relation(fields: [advertiserId], references: [id])
   products         Product[]
+
+  @@index([advertiserId])
 }
 
 model Product {
@@ -99,8 +107,12 @@ model Product {
   name        String
   price       Decimal @default(0)
   affiliateCommission Float @default(0)
+  url         String?
+  createdAt   DateTime @default(now())
   campaign    Campaign @relation(fields: [campaignId], references: [id])
   affiliateLinks AffiliateLink[]
+
+  @@index([campaignId])
 }
 
 model AffiliateLink {
@@ -108,10 +120,14 @@ model AffiliateLink {
   productId String
   creatorId String
   token     String @unique
+  createdAt DateTime @default(now())
   product   Product @relation(fields: [productId], references: [id])
   creator   User    @relation(fields: [creatorId], references: [id])
   clicks    Click[]
   conversions Conversion[]
+
+  @@index([creatorId])
+  @@index([productId])
 }
 
 model Click {
@@ -119,23 +135,33 @@ model Click {
   affiliateLinkId String
   createdAt      DateTime @default(now())
   affiliateLink  AffiliateLink @relation(fields: [affiliateLinkId], references: [id])
+
+  @@index([affiliateLinkId, createdAt])
 }
 
 model Conversion {
   id               String @id @default(uuid())
   affiliateLinkId  String
+  orderId          String?  @unique
   amount           Decimal @default(0)
   createdAt        DateTime @default(now())
   affiliateLink    AffiliateLink @relation(fields: [affiliateLinkId], references: [id])
+  commission       Commission?
+
+  @@index([affiliateLinkId, createdAt])
 }
 
 model Commission {
   id          String @id @default(uuid())
   userId      String
+  conversionId String? @unique
   amount      Decimal @default(0)
   description String?
   createdAt   DateTime @default(now())
   user        User @relation(fields: [userId], references: [id])
+  conversion  Conversion? @relation(fields: [conversionId], references: [id])
+
+  @@index([userId, createdAt])
 }
 
 model Wallet {
@@ -156,6 +182,8 @@ model Transaction {
   note      String?
   createdAt DateTime @default(now())
   wallet    Wallet @relation(fields: [walletId], references: [id])
+
+  @@index([walletId, createdAt])
 }
 
 model Payout {
@@ -167,6 +195,9 @@ model Payout {
   requestedAt DateTime @default(now())
   processedAt DateTime?
   wallet    Wallet @relation(fields: [walletId], references: [id])
+
+  @@index([walletId, requestedAt])
+  @@index([status])
 }
 
 model Subscription {
@@ -182,18 +213,23 @@ model Subscription {
 model TokenUsage {
   id        String @id @default(uuid())
   userId    String
+  jobId     String?  @unique
   usedTokens Int @default(0)
   date      DateTime @default(now())
   user      User @relation(fields: [userId], references: [id])
+
+  @@index([userId, date])
 }
 
 model AIProvider {
   id          String @id @default(uuid())
-  name        String
+  name        String @unique
   type        String // text, image, video, voice
   config      Json
   enabled     Boolean @default(true)
   jobs        AIJob[]
+
+  @@index([type, enabled])
 }
 
 model AIJob {
@@ -210,6 +246,9 @@ model AIJob {
   provider    AIProvider @relation(fields: [providerId], references: [id])
   generatedContent GeneratedContent?
   generatedVideo   GeneratedVideo?
+
+  @@index([userId, createdAt])
+  @@index([status])
 }
 
 model GeneratedContent {
@@ -220,17 +259,21 @@ model GeneratedContent {
   createdAt DateTime @default(now())
   user      User @relation(fields: [userId], references: [id])
   job       AIJob @relation(fields: [jobId], references: [id])
+
+  @@index([userId, createdAt])
 }
 
 model GeneratedVideo {
   id        String @id @default(uuid())
   userId    String
   jobId     String   @unique
-  url       String
+  url       String?
   metadata  Json?
   createdAt DateTime @default(now())
   user      User @relation(fields: [userId], references: [id])
   job       AIJob @relation(fields: [jobId], references: [id])
+
+  @@index([userId, createdAt])
 }
 
 model Workflow {
@@ -242,6 +285,8 @@ model Workflow {
   steps       WorkflowStep[]
   createdAt   DateTime @default(now())
   user        User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
 
 model WorkflowStep {
@@ -250,7 +295,9 @@ model WorkflowStep {
   order       Int
   type        String // e.g., generate_script, render_video
   config      Json?
-  workflow    Workflow @relation(fields: [workflowId], references: [id])
+  workflow    Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
 }
 
 model Notification {
