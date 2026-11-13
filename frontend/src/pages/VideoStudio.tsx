@@ -1173,7 +1173,12 @@ export default function VideoStudio() {
                         preload="metadata"
                         style={{ height: 56, borderRadius: 6, background: '#05070c' }}
                       />
-                      <a href={item.url} target="_blank" rel="noreferrer" className="card-link">
+                      <a
+                        href={`/api/v1/video/watch/${item.jobId}.mp4`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="card-link"
+                      >
                         Buka
                       </a>
                     </div>

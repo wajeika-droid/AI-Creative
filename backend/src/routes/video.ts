@@ -63,6 +63,44 @@ router.post('/render', authenticate, rbac('create_video'), async (req: Request, 
   res.status(202).json({ jobId: job.id, status: job.status });
 });
 
+router.get('/watch/:name', async (req: Request, res: Response) => {
+  const jobId = req.params.name.replace(/\.mp4$/i, '');
+  if (!req.params.name.toLowerCase().endsWith('.mp4') || !VIDEO_FILE_PATTERN.test(jobId)) {
+    return res.status(404).type('html').send('<p>Video tidak ditemukan.</p>');
+  }
+  const record = await prisma.generatedVideo.findFirst({
+    where: { jobId },
+    select: { id: true },
+  });
+  if (!record) return res.status(404).type('html').send('<p>Video tidak ditemukan.</p>');
+  // Helmet's default CSP includes upgrade-insecure-requests, which rewrites the
+  // same-origin <video> request to https and breaks playback on plain-HTTP hosts.
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; media-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'self'; form-action 'self'"
+  );
+  res.type('html').send(`<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview Video - Creative Partner</title>
+<style>
+html,body{margin:0;height:100%;background:#070a12;color:#e6e9f4;font-family:system-ui,sans-serif}
+main{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;height:100%;padding:16px;box-sizing:border-box}
+video{width:min(100%,960px);max-height:80vh;border-radius:12px;background:#000;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+a{color:#b9a9ff;font-size:14px}
+</style>
+</head>
+<body>
+<main>
+<video src="/api/v1/video/files/${jobId}.mp4" controls autoplay muted playsinline preload="auto"></video>
+<a href="/api/v1/video/files/${jobId}.mp4" download>Unduh MP4</a>
+</main>
+</body>
+</html>`);
+});
+
 router.get('/files/:name', async (req: Request, res: Response) => {
   const jobId = req.params.name.replace(/\.mp4$/i, '');
   if (!req.params.name.toLowerCase().endsWith('.mp4') || !VIDEO_FILE_PATTERN.test(jobId)) {
@@ -73,6 +111,7 @@ router.get('/files/:name', async (req: Request, res: Response) => {
     select: { id: true },
   });
   if (!record) return res.status(404).json({ error: 'File tidak ditemukan' });
+  res.removeHeader('Content-Security-Policy');
   res.sendFile(path.join(STORAGE_DIR, `${jobId}.mp4`), error => {
     if (error && !res.headersSent) res.status(404).json({ error: 'File tidak ditemukan' });
   });
