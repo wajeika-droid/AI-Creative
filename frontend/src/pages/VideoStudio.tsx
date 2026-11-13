@@ -1196,6 +1196,7 @@ export default function VideoStudio() {
               <th>Status</th>
               <th>Dibuat</th>
               <th>Hasil</th>
+              <th>Aksi</th>
             </tr>
           </thead>
           <tbody>
@@ -1226,24 +1227,29 @@ export default function VideoStudio() {
                       >
                         Buka
                       </a>
-                      <button
-                        className="btn ghost sm"
-                        title="Edit pengaturan render"
-                        onClick={() => editRender(item)}
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      <button
-                        className="btn ghost sm"
-                        title="Hapus render"
-                        onClick={() => deleteRender(item)}
-                      >
-                        <Trash2 size={13} />
-                      </button>
                     </div>
                   ) : (
                     <span className="muted">belum tersedia</span>
                   )}
+                </td>
+                <td>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      className="btn subtle sm"
+                      title="Edit pengaturan render"
+                      onClick={() => editRender(item)}
+                    >
+                      <Pencil size={12} /> Edit
+                    </button>
+                    <button
+                      className="btn ghost sm"
+                      title="Hapus render"
+                      style={{ color: '#ff7b8a' }}
+                      onClick={() => deleteRender(item)}
+                    >
+                      <Trash2 size={12} /> Hapus
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
