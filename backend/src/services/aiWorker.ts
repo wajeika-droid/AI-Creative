@@ -45,11 +45,11 @@ async function renderVideoFile(jobId: string, input: any) {
     const rawScenes: any[] =
       Array.isArray(input?.scenes) && input.scenes.length
         ? input.scenes
-        : [{ mediaId: 'studio', duration: clamp(Number(input?.duration) || 8, 2, 120) }];
+        : [{ mediaId: 'studio', duration: clamp(Number(input?.duration) || 8, 1, 120) }];
 
     const scenes = rawScenes.slice(0, 8).map(scene => ({
       mediaId: typeof scene?.mediaId === 'string' ? scene.mediaId : 'studio',
-      duration: clamp(Number(scene?.duration) || 8, 2, 120),
+      duration: clamp(Number(scene?.duration) || 8, 1, 120),
       dataUrl: typeof scene?.dataUrl === 'string' ? scene.dataUrl : undefined,
     }));
 
