@@ -41,6 +41,7 @@ const initialForm = {
   mood: 'Neutral',
   musicStyle: 'Soft Ambient',
   musicVolume: 0.3,
+  motion: 'Cinematic',
   autoSubtitles: true,
   scheduleType: 'daily' as 'daily' | 'weekly',
   timeOfDay: '09:00',
@@ -108,6 +109,7 @@ export default function Automation() {
       mood: input.mood ?? 'Neutral',
       musicStyle: input.musicStyle ?? 'Soft Ambient',
       musicVolume: Number(input.musicVolume ?? 0.3),
+      motion: input.motion ?? 'Cinematic',
       autoSubtitles: input.autoSubtitles !== false,
       scheduleType: item.scheduleType,
       timeOfDay: item.timeOfDay,
@@ -142,6 +144,7 @@ export default function Automation() {
           mood: form.mood,
           musicStyle: form.musicStyle,
           musicVolume: form.musicVolume,
+          motion: form.motion,
           autoSubtitles: form.autoSubtitles,
           showSubtitles: true,
           voiceEnabled: true,
@@ -315,6 +318,13 @@ export default function Automation() {
                 disabled={form.musicStyle === 'None'}
                 onChange={event => setField('musicVolume', Number(event.target.value))}
               />
+            </div>
+            <div className="form-row">
+              <label>Gerakan kamera</label>
+              <select value={form.motion} onChange={event => setField('motion', event.target.value)}>
+                <option>Cinematic</option>
+                <option>None</option>
+              </select>
             </div>
           </div>
 

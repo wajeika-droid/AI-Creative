@@ -22,6 +22,7 @@ const inputSchema = z.object({
   subtitleSize: z.enum(['Small', 'Medium', 'Large']).optional(),
   subtitlePosition: z.enum(['Top', 'Bottom']).optional(),
   transition: z.enum(['None', 'Fade', 'Slide', 'Zoom']).optional(),
+  motion: z.enum(['None', 'Cinematic']).optional(),
   brandName: z.string().max(60).optional(),
   brandColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   voiceEnabled: z.boolean().optional(),

@@ -37,6 +37,26 @@ function plainText(value: unknown) {
     .trim();
 }
 
+// Slow camera moves make a still photo feel filmed rather than looped.
+// Styles rotate per scene so consecutive stills do not move identically.
+function motionFilter(index: number, width: number, height: number, frames: number, fps: number) {
+  const last = Math.max(1, frames - 1);
+  const ratio = `${width}x${height}`;
+  const centerX = 'iw/2-(iw/zoom/2)';
+  const centerY = 'ih/2-(ih/zoom/2)';
+  const base = `d=${frames}:s=${ratio}:fps=${fps}`;
+  switch (index % 4) {
+    case 0:
+      return `zoompan=z='1+0.12*on/${last}':x='${centerX}':y='${centerY}':${base}`;
+    case 1:
+      return `zoompan=z='1.12':x='(iw-iw/zoom)*on/${last}':y='${centerY}':${base}`;
+    case 2:
+      return `zoompan=z='1.12-0.12*on/${last}':x='${centerX}':y='${centerY}':${base}`;
+    default:
+      return `zoompan=z='1.12':x='(iw-iw/zoom)*(1-on/${last})':y='${centerY}':${base}`;
+  }
+}
+
 async function renderVideoFile(jobId: string, input: any) {
   await fs.mkdir(STORAGE_DIR, { recursive: true });
   const outPath = path.join(STORAGE_DIR, `${jobId}.mp4`);
@@ -78,6 +98,7 @@ async function renderVideoFile(jobId: string, input: any) {
     const requestedTransition = ['Fade', 'Slide', 'Zoom'].includes(String(input?.transition))
       ? String(input.transition)
       : 'None';
+    const cinematic = input?.motion === 'Cinematic';
     const fadeDuration =
       requestedTransition === 'None' || files.length < 2
         ? 0
@@ -154,8 +175,8 @@ async function renderVideoFile(jobId: string, input: any) {
     const concatEntries: string[] = [];
     const ffmpegOptions = { timeout: 180000, maxBuffer: 16 * 1024 * 1024 };
 
-    // Caption/brand are baked into one still per scene, then the still is looped
-    // in memory. Re-running drawtext per frame made renders ~4x slower.
+    // Caption/brand are baked into one still per scene. Static scenes loop the
+    // still; cinematic scenes animate it with a slow zoom/pan.
     for (let index = 0; index < files.length; index++) {
       const still = path.join(tmpDir, `still-${index}.jpg`);
       await execFileAsync(
@@ -182,12 +203,15 @@ async function renderVideoFile(jobId: string, input: any) {
       );
 
       const duration = durations[index];
-      const filters = [
-        `loop=loop=${Math.max(1, Math.round(duration * fps) - 1)}:size=1:start=0`,
-        `setpts=N/(${fps}*TB)`,
-        `fps=${fps}`,
-        'format=yuv420p',
-      ];
+      const frames = Math.max(2, Math.round(duration * fps));
+      const filters = cinematic
+        ? [motionFilter(index, width, height, frames, fps), 'format=yuv420p']
+        : [
+            `loop=loop=${Math.max(1, frames - 1)}:size=1:start=0`,
+            `setpts=N/(${fps}*TB)`,
+            `fps=${fps}`,
+            'format=yuv420p',
+          ];
       if (fadeDuration > 0) {
         filters.push(
           `fade=t=in:st=0:d=${fadeDuration.toFixed(2)}`,
@@ -302,6 +326,7 @@ async function renderVideoFile(jobId: string, input: any) {
       height,
       fps,
       scenes: files.length,
+      motion: cinematic ? 'Cinematic' : 'None',
       audio: {
         voiceover: speech
           ? {

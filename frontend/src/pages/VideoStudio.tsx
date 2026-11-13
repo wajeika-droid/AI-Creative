@@ -108,6 +108,7 @@ export default function VideoStudio() {
   const [avatarIndex, setAvatarIndex] = useState(0);
   const [avatarLook, setAvatarLook] = useState('Natural');
   const [transition, setTransition] = useState('Fade');
+  const [motion, setMotion] = useState('Cinematic');
   const [transitionDuration, setTransitionDuration] = useState(0.6);
   const [resolution, setResolution] = useState('Full HD (1920x1080)');
   const [fps, setFps] = useState('30 FPS');
@@ -164,6 +165,7 @@ export default function VideoStudio() {
         setAvatarIndex(Number(draft.avatarIndex ?? 0));
         setAvatarLook(draft.avatarLook ?? 'Natural');
         setTransition(draft.transition ?? 'Fade');
+        setMotion(draft.motion ?? 'Cinematic');
         setTransitionDuration(Number(draft.transitionDuration ?? 0.6));
         setResolution(draft.resolution ?? 'Full HD (1920x1080)');
         setFps(draft.fps ?? '30 FPS');
@@ -279,6 +281,7 @@ export default function VideoStudio() {
     if (input.subtitleSize) setSubtitleSize(input.subtitleSize);
     if (input.subtitlePosition) setSubtitlePosition(input.subtitlePosition);
     if (input.transition) setTransition(input.transition);
+    if (input.motion) setMotion(input.motion);
     if (input.brandName) setBrandName(input.brandName);
     if (input.brandColor) setBrandColor(input.brandColor);
     setVoiceEnabled(input.voiceEnabled !== false);
@@ -329,6 +332,7 @@ export default function VideoStudio() {
         avatarIndex,
         avatarLook,
         transition,
+        motion,
         transitionDuration,
         resolution,
         fps,
@@ -552,6 +556,7 @@ export default function VideoStudio() {
         subtitleSize,
         subtitlePosition,
         transition,
+        motion,
         transitionDuration,
         brandName,
         brandColor,
@@ -1239,6 +1244,24 @@ export default function VideoStudio() {
                 value={transitionDuration}
                 onChange={event => setTransitionDuration(Number(event.target.value))}
               />
+              <div className="side-meta" style={{ marginTop: 14, marginBottom: 4 }}>
+                <span>Gerakan kamera</span>
+                <span>{motion === 'Cinematic' ? 'Zoom & pan' : 'Statis'}</span>
+              </div>
+              <div className="segmented" style={{ marginBottom: 10 }}>
+                {['None', 'Cinematic'].map(item => (
+                  <button
+                    key={item}
+                    className={motion === item ? 'active' : ''}
+                    onClick={() => setMotion(item)}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+              <div className="muted" style={{ marginTop: 10, fontSize: 11 }}>
+                Cinematic memberi gerakan zoom/pan halus per scene agar foto tidak terasa seperti slideshow.
+              </div>
               <div className="muted" style={{ marginTop: 10, fontSize: 11 }}>
                 Transisi diterapkan di antara {scenes.length} scene saat render.
               </div>

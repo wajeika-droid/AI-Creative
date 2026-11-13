@@ -33,6 +33,7 @@ const videoSchema = z
     subtitleSize: z.enum(['Small', 'Medium', 'Large']).optional(),
     subtitlePosition: z.enum(['Top', 'Bottom']).optional(),
     transition: z.enum(['None', 'Fade', 'Slide', 'Zoom']).optional(),
+    motion: z.enum(['None', 'Cinematic']).optional(),
     transitionDuration: z.number().min(0).max(2).optional(),
     brandName: z.string().max(60).optional(),
     brandColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
