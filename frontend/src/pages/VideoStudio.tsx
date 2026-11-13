@@ -18,6 +18,7 @@ import {
   Music,
   Palette,
   Pause,
+  Pencil,
   Play,
   Plus,
   RefreshCcw,
@@ -231,6 +232,50 @@ export default function VideoStudio() {
       '0'
     )}`;
   };
+
+  function editRender(item: any) {
+    const input = item?.job?.input || {};
+    if (['16:9', '9:16', '1:1'].includes(input.format)) setRatio(input.format);
+    if (Array.isArray(input.scenes) && input.scenes.length) {
+      setScenes(
+        input.scenes.map((entry: any, index: number) => ({
+          id: `s${index + 1}`,
+          label: `Scene ${String(index + 1).padStart(2, '0')}`,
+          duration: Math.min(120, Math.max(1, Number(entry?.duration) || 8)),
+          mediaId:
+            typeof entry?.mediaId === 'string'
+              ? entry.mediaId
+              : mediaItems[index % mediaItems.length].id,
+        }))
+      );
+      setScene(0);
+      setPlaying(false);
+      currentTimeRef.current = 0;
+      setCurrentTime(0);
+    }
+    if (typeof input.caption === 'string') setCaption(input.caption);
+    setShowSubtitles(input.showSubtitles !== false);
+    if (input.subtitleSize) setSubtitleSize(input.subtitleSize);
+    if (input.subtitlePosition) setSubtitlePosition(input.subtitlePosition);
+    if (input.transition) setTransition(input.transition);
+    if (input.brandName) setBrandName(input.brandName);
+    if (input.brandColor) setBrandColor(input.brandColor);
+    notify('Pengaturan render dimuat ke editor. Sesuaikan lalu render ulang.');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function deleteRender(item: any) {
+    if (!window.confirm('Hapus render ini? File MP4 ikut dihapus dan tidak bisa dikembalikan.')) {
+      return;
+    }
+    try {
+      await api.delete(`/video/${item.id}`);
+      notify('Render dihapus.');
+      loadRenders();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
 
   function saveProject() {
     localStorage.setItem(
@@ -1168,7 +1213,7 @@ export default function VideoStudio() {
                   {item.url ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <video
-                        src={item.url}
+                        src={`${item.url}#t=0.1`}
                         controls
                         preload="metadata"
                         style={{ height: 56, borderRadius: 6, background: '#05070c' }}
@@ -1181,6 +1226,20 @@ export default function VideoStudio() {
                       >
                         Buka
                       </a>
+                      <button
+                        className="btn ghost sm"
+                        title="Edit pengaturan render"
+                        onClick={() => editRender(item)}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        className="btn ghost sm"
+                        title="Hapus render"
+                        onClick={() => deleteRender(item)}
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
                   ) : (
                     <span className="muted">belum tersedia</span>

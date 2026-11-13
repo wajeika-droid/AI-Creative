@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
@@ -135,6 +136,17 @@ router.get('/', authenticate, rbac('create_video'), async (req: Request, res: Re
     },
   });
   res.json(items);
+});
+
+router.delete('/:id', authenticate, rbac('create_video'), async (req: Request, res: Response) => {
+  const userId = (req as any).user.id;
+  const item = await prisma.generatedVideo.findFirst({
+    where: { id: req.params.id, userId },
+  });
+  if (!item) return res.status(404).json({ error: 'Render tidak ditemukan' });
+  await prisma.generatedVideo.delete({ where: { id: item.id } });
+  await fs.rm(path.join(STORAGE_DIR, `${item.jobId}.mp4`), { force: true });
+  res.json({ ok: true });
 });
 
 router.get('/jobs/:id', authenticate, rbac('create_video'), async (req: Request, res: Response) => {
