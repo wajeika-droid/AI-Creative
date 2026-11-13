@@ -1,4 +1,10 @@
-import { ChangeEvent, useEffect, useState } from 'react';
+import {
+  ChangeEvent,
+  MouseEvent as ReactMouseEvent,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   BarChart3,
   Check,
@@ -42,11 +48,11 @@ const tools = [
 ];
 
 const initialScenes = [
-  { id: 's1', label: 'Scene 01', duration: 8 },
-  { id: 's2', label: 'Scene 02', duration: 10 },
-  { id: 's3', label: 'Scene 03', duration: 12 },
-  { id: 's4', label: 'Scene 04', duration: 8 },
-  { id: 's5', label: 'Scene 05', duration: 15 },
+  { id: 's1', label: 'Scene 01', duration: 8, mediaId: 'studio' },
+  { id: 's2', label: 'Scene 02', duration: 10, mediaId: 'presenter' },
+  { id: 's3', label: 'Scene 03', duration: 12, mediaId: 'skincare' },
+  { id: 's4', label: 'Scene 04', duration: 8, mediaId: 'workspace' },
+  { id: 's5', label: 'Scene 05', duration: 15, mediaId: 'studio' },
 ];
 
 const mediaItems = [
@@ -104,6 +110,8 @@ export default function VideoStudio() {
   const [uploadedSrc, setUploadedSrc] = useState('');
   const [uploadName, setUploadName] = useState('');
   const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const currentTimeRef = useRef(0);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [scriptError, setScriptError] = useState('');
@@ -148,7 +156,19 @@ export default function VideoStudio() {
         setBrandName(draft.brandName ?? 'Creative Partner');
         setBrandColor(draft.brandColor ?? '#7c5cff');
         setBrandFont(draft.brandFont ?? 'Inter');
-        if (Array.isArray(draft.scenes) && draft.scenes.length) setScenes(draft.scenes);
+        if (Array.isArray(draft.scenes) && draft.scenes.length) {
+          setScenes(
+            draft.scenes.map((item: any, index: number) => ({
+              id: String(item?.id ?? `s${index + 1}`),
+              label: String(item?.label ?? `Scene ${String(index + 1).padStart(2, '0')}`),
+              duration: Math.min(120, Math.max(1, Number(item?.duration) || 8)),
+              mediaId:
+                typeof item?.mediaId === 'string'
+                  ? item.mediaId
+                  : mediaItems[index % mediaItems.length].id,
+            }))
+          );
+        }
         const media = mediaItems.find(item => item.id === draft.mediaId);
         if (media) {
           setMediaId(media.id);
@@ -164,7 +184,53 @@ export default function VideoStudio() {
   const durationLabel = `${String(Math.floor(totalSeconds / 60)).padStart(2, '0')}:${String(
     totalSeconds % 60
   ).padStart(2, '0')}`;
+  const sceneStarts: number[] = [];
+  let cursor = 0;
+  for (const item of scenes) {
+    sceneStarts.push(cursor);
+    cursor += item.duration;
+  }
+  const playbackIndex = scenes.findIndex(
+    (item, index) => currentTime < sceneStarts[index] + item.duration
+  );
   const activeScene = scenes[scene] ?? scenes[0];
+
+  useEffect(() => {
+    if (!playing) return;
+    let last = performance.now();
+    const timer = window.setInterval(() => {
+      const now = performance.now();
+      const delta = Math.min(0.5, (now - last) / 1000);
+      last = now;
+      setCurrentTime(previous => Math.min(totalSeconds, previous + delta));
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [playing, totalSeconds]);
+
+  useEffect(() => {
+    if (playing && currentTime >= totalSeconds) setPlaying(false);
+  }, [playing, currentTime, totalSeconds]);
+
+  useEffect(() => {
+    if (playing && playbackIndex >= 0 && playbackIndex !== scene) setScene(playbackIndex);
+  }, [playing, playbackIndex, scene]);
+
+  useEffect(() => {
+    setCurrentTime(previous => Math.min(previous, totalSeconds));
+  }, [totalSeconds]);
+
+  useEffect(() => {
+    currentTimeRef.current = currentTime;
+  }, [currentTime]);
+
+  const progressPercent = totalSeconds ? Math.min(100, (currentTime / totalSeconds) * 100) : 0;
+  const formatTime = (value: number) => {
+    const seconds = Math.max(0, Math.floor(value));
+    return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(
+      2,
+      '0'
+    )}`;
+  };
 
   function saveProject() {
     localStorage.setItem(
@@ -197,10 +263,51 @@ export default function VideoStudio() {
     notify('Draft project disimpan di browser.');
   }
 
+  function sceneMediaSrc(item: { mediaId?: string }) {
+    if (item.mediaId === 'upload') return uploadedSrc || previewSrc;
+    return mediaItems.find(media => media.id === item.mediaId)?.src ?? previewSrc;
+  }
+
+  function selectScene(index: number) {
+    setScene(index);
+    setCurrentTime(sceneStarts[index] ?? 0);
+    setPlaying(false);
+  }
+
+  function togglePlay() {
+    if (!playing && currentTime >= totalSeconds - 0.05) {
+      currentTimeRef.current = 0;
+      setCurrentTime(0);
+      setScene(0);
+    }
+    setPlaying(value => !value);
+  }
+
+  function seekTo(time: number) {
+    const next = Math.min(totalSeconds, Math.max(0, time));
+    currentTimeRef.current = next;
+    setCurrentTime(next);
+    const index = scenes.findIndex(
+      (item, position) => next < sceneStarts[position] + item.duration
+    );
+    setScene(index === -1 ? scenes.length - 1 : index);
+  }
+
+  function skip(seconds: number) {
+    seekTo(currentTimeRef.current + seconds);
+  }
+
+  function handleSeek(event: ReactMouseEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width) return;
+    seekTo(((event.clientX - rect.left) / rect.width) * totalSeconds);
+  }
+
   function applyMedia(id: string, src: string) {
     setMediaId(id);
     setPreviewSrc(src);
-    notify('Media diterapkan ke preview scene.');
+    setScenes(scenes.map((item, index) => (index === scene ? { ...item, mediaId: id } : item)));
+    notify(`Media diterapkan ke ${scenes[scene]?.label ?? 'scene'}.`);
   }
 
   function handleUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -208,12 +315,26 @@ export default function VideoStudio() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result !== 'string') return;
-      setUploadedSrc(reader.result);
-      setUploadName(file.name);
-      setMediaId('upload');
-      setPreviewSrc(reader.result);
-      notify(`Media ${file.name} diunggah ke library.`);
+      const result = reader.result;
+      if (typeof result !== 'string') return;
+      const image = new Image();
+      image.onload = () => {
+        const scale = Math.min(1, 1600 / Math.max(image.width, image.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        setUploadedSrc(dataUrl);
+        setUploadName(file.name);
+        setMediaId('upload');
+        setPreviewSrc(dataUrl);
+        setScenes(
+          scenes.map((item, index) => (index === scene ? { ...item, mediaId: 'upload' } : item))
+        );
+        notify(`Media ${file.name} diunggah ke ${scenes[scene]?.label ?? 'scene'}.`);
+      };
+      image.src = result;
     };
     reader.readAsDataURL(file);
     event.target.value = '';
@@ -228,6 +349,7 @@ export default function VideoStudio() {
       id: `s${Date.now()}`,
       label: `Scene ${String(scenes.length + 1).padStart(2, '0')}`,
       duration: 8,
+      mediaId: mediaItems[scenes.length % mediaItems.length].id,
     };
     setScenes([...scenes, next]);
     setScene(scenes.length);
@@ -303,6 +425,7 @@ export default function VideoStudio() {
       return;
     }
     setExporting(true);
+    setPlaying(false);
     setError('');
     try {
       const { data } = await api.post('/video/render', {
@@ -310,21 +433,41 @@ export default function VideoStudio() {
         text,
         script: text,
         format: ratio,
+        scenes: scenes.map(item => ({
+          mediaId: item.mediaId ?? 'studio',
+          duration: item.duration,
+          ...(item.mediaId === 'upload' && uploadedSrc ? { dataUrl: uploadedSrc } : {}),
+        })),
+        caption,
+        showSubtitles,
+        subtitleSize,
+        subtitlePosition,
+        transition,
+        transitionDuration,
+        brandName,
+        brandColor,
+        brandFont,
+        resolution,
+        fps,
       });
-      notify(`Render video dikirim ke worker (job ${data.jobId}).`);
+      notify(`Render video dikirim ke worker (job ${data.jobId}). Proses 30-180 detik.`);
 
-      for (let attempt = 0; attempt < 20; attempt++) {
-        await sleep(1500);
+      let finished = false;
+      for (let attempt = 0; attempt < 180; attempt++) {
+        await sleep(2000);
         const { data: job } = await api.get(`/video/jobs/${data.jobId}`);
         if (job.status === 'success') {
-          notify('Render selesai dan tersimpan di daftar render terbaru.');
+          notify('Render selesai. Video siap diputar di daftar render terbaru.');
+          finished = true;
           break;
         }
         if (job.status === 'failed') {
           setError('Render video gagal diproses. Coba lagi.');
+          finished = true;
           break;
         }
       }
+      if (!finished) notify('Render masih diproses di worker. Cek daftar render beberapa saat lagi.');
       loadRenders();
     } catch (err) {
       setError(errorMessage(err));
@@ -411,10 +554,16 @@ export default function VideoStudio() {
               <div
                 key={item.id}
                 className={`scene-thumb${scene === index ? ' active' : ''}`}
-                onClick={() => setScene(index)}
+                onClick={() => selectScene(index)}
                 role="button"
               >
-                <i />
+                <i
+                  style={{
+                    backgroundImage: `url(${sceneMediaSrc(item)})`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                  }}
+                />
                 <span>
                   {item.label} · {item.duration}s
                 </span>
@@ -422,8 +571,18 @@ export default function VideoStudio() {
             ))}
           </div>
 
-          <div className="preview">
-            <img src={previewSrc} alt="AI video preview" />
+          <div className="preview" style={{ aspectRatio: ratio.replace(':', ' / ') }}>
+            <div
+              key={activeScene.id}
+              className={`scene-stage t-${transition.toLowerCase()}${playing ? ' playing' : ''}`}
+            >
+              <img
+                className="scene-media"
+                src={sceneMediaSrc(activeScene)}
+                alt={`Preview ${activeScene.label}`}
+                style={{ animationDuration: `${Math.max(2, activeScene.duration)}s` }}
+              />
+            </div>
             {brandName && (
               <div className="preview-brand" style={{ color: brandColor, fontFamily: brandFont }}>
                 {brandName}
@@ -441,14 +600,38 @@ export default function VideoStudio() {
                 {caption}
               </div>
             )}
+            <div className="preview-progress" onClick={handleSeek} title="Seek timeline">
+              <i style={{ width: `${progressPercent}%` }} />
+            </div>
             <div className="preview-bar">
-              <button className="play-btn" onClick={() => setPlaying(!playing)}>
+              <button
+                className="play-btn"
+                onClick={togglePlay}
+                aria-label={playing ? 'Pause' : 'Play'}
+              >
                 {playing ? <Pause size={14} /> : <Play size={14} />}
               </button>
-              <SkipBack size={14} />
-              <SkipForward size={14} />
-              <span>00:00 / {durationLabel}</span>
+              <button
+                className="bar-icon"
+                onClick={() => skip(-5)}
+                aria-label="Mundur 5 detik"
+              >
+                <SkipBack size={14} />
+              </button>
+              <button
+                className="bar-icon"
+                onClick={() => skip(5)}
+                aria-label="Maju 5 detik"
+              >
+                <SkipForward size={14} />
+              </button>
+              <span>
+                {formatTime(currentTime)} / {durationLabel}
+              </span>
               <span className="spacer" />
+              <span className="chip neutral">
+                {activeScene.label} · {playing ? 'Playing' : 'Paused'}
+              </span>
               <span className="chip neutral">{ratio}</span>
               <span className="chip neutral">{showSubtitles ? 'CC' : 'CC off'}</span>
               <span className="chip neutral">HD</span>
@@ -461,12 +644,13 @@ export default function VideoStudio() {
                 <Clapperboard size={12} /> Video
               </div>
               <div className="track-lane">
-                {scenes.map(item => (
+                {scenes.map((item, index) => (
                   <div
                     key={item.id}
-                    className="clip violet"
+                    className={`clip violet${scene === index ? ' selected' : ''}`}
                     style={{ flexGrow: item.duration, width: 0 }}
                     title={`${item.label} · ${item.duration}s`}
+                    onClick={() => selectScene(index)}
                   />
                 ))}
               </div>
@@ -943,7 +1127,7 @@ export default function VideoStudio() {
               <Wand2 size={14} color="#b9a9ff" />
             </div>
             <div className="muted" style={{ marginBottom: 12 }}>
-              Job akan diproses worker BullMQ. Hasil tersimpan otomatis setelah selesai.
+              Worker merender MP4 asli (scene, transisi, caption, brand) dalam 30-180 detik. Hasil tersimpan otomatis.
             </div>
             <button className="btn" style={{ width: '100%' }} onClick={exportVideo} disabled={exporting}>
               <Download size={14} /> {exporting ? 'Mengirim...' : 'Render video'}
@@ -982,11 +1166,19 @@ export default function VideoStudio() {
                 <td>{new Date(item.createdAt).toLocaleString('id-ID')}</td>
                 <td>
                   {item.url ? (
-                    <a href={item.url} target="_blank" rel="noreferrer" className="card-link">
-                      Buka video
-                    </a>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <video
+                        src={item.url}
+                        controls
+                        preload="metadata"
+                        style={{ height: 56, borderRadius: 6, background: '#05070c' }}
+                      />
+                      <a href={item.url} target="_blank" rel="noreferrer" className="card-link">
+                        Buka
+                      </a>
+                    </div>
                   ) : (
-                    <span className="muted">mock render</span>
+                    <span className="muted">belum tersedia</span>
                   )}
                 </td>
               </tr>

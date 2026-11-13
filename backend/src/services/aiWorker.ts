@@ -1,3 +1,9 @@
+import { execFile } from 'node:child_process';
+import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { prisma } from '../lib/prisma';
@@ -5,6 +11,238 @@ import { prisma } from '../lib/prisma';
 const connection = new IORedis(process.env.REDIS_URL || 'redis://redis:6379', {
   maxRetriesPerRequest: null,
 });
+
+const execFileAsync = promisify(execFile);
+const STORAGE_DIR = process.env.VIDEO_STORAGE_DIR || '/app/storage';
+const FONT_PATH = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
+
+const builtinAssets: Record<string, string> = {
+  studio: '/app/public/images/video-preview.png',
+  presenter: '/app/public/images/ai-presenter.png',
+  skincare: '/app/public/images/media-skincare.png',
+  workspace: '/app/public/images/media-workspace.png',
+  raka: '/app/public/images/avatar-raka.png',
+  nadia: '/app/public/images/avatar-nadia.png',
+};
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function plainText(value: unknown) {
+  return String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function renderVideoFile(jobId: string, input: any) {
+  await fs.mkdir(STORAGE_DIR, { recursive: true });
+  const outPath = path.join(STORAGE_DIR, `${jobId}.mp4`);
+  await fs.rm(outPath, { force: true });
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cpai-render-'));
+
+  try {
+    const rawScenes: any[] =
+      Array.isArray(input?.scenes) && input.scenes.length
+        ? input.scenes
+        : [{ mediaId: 'studio', duration: clamp(Number(input?.duration) || 8, 2, 120) }];
+
+    const scenes = rawScenes.slice(0, 8).map(scene => ({
+      mediaId: typeof scene?.mediaId === 'string' ? scene.mediaId : 'studio',
+      duration: clamp(Number(scene?.duration) || 8, 2, 120),
+      dataUrl: typeof scene?.dataUrl === 'string' ? scene.dataUrl : undefined,
+    }));
+
+    const files: string[] = [];
+    for (let index = 0; index < scenes.length; index++) {
+      const scene = scenes[index];
+      let file = builtinAssets[scene.mediaId];
+      if (!file && scene.dataUrl?.startsWith('data:image/')) {
+        const base64 = scene.dataUrl.slice(scene.dataUrl.indexOf(',') + 1);
+        if (base64) {
+          file = path.join(tmpDir, `scene-${index}.png`);
+          await fs.writeFile(file, Buffer.from(base64, 'base64'));
+        }
+      }
+      files.push(file && existsSync(file) ? file : builtinAssets.studio);
+    }
+
+    const format = String(input?.format || '16:9');
+    const [width, height] =
+      format === '9:16' ? [540, 960] : format === '1:1' ? [720, 720] : [960, 540];
+    const fps = 20;
+    const durations = scenes.map(scene => scene.duration);
+    const total = durations.reduce((sum, value) => sum + value, 0);
+    const requestedTransition = ['Fade', 'Slide', 'Zoom'].includes(String(input?.transition))
+      ? String(input.transition)
+      : 'None';
+    const fadeDuration =
+      requestedTransition === 'None' || files.length < 2
+        ? 0
+        : Math.min(0.4, Math.min(...durations) / 4);
+
+    const caption = plainText(input?.caption || input?.text || input?.script).slice(0, 260);
+    const showCaption = input?.showSubtitles !== false && caption.length > 0;
+    const captionSize = input?.subtitleSize === 'Large' ? 34 : input?.subtitleSize === 'Small' ? 22 : 27;
+    const brand = plainText(input?.brandName).slice(0, 40);
+    const brandColor = /^#[0-9a-f]{6}$/i.test(String(input?.brandColor || ''))
+      ? String(input.brandColor).replace('#', '0x')
+      : '0x7c5cff';
+
+    let captionFile = '';
+    if (showCaption) {
+      captionFile = path.join(tmpDir, 'caption.txt');
+      await fs.writeFile(captionFile, caption);
+    }
+
+    let brandFile = '';
+    if (brand) {
+      brandFile = path.join(tmpDir, 'brand.txt');
+      await fs.writeFile(brandFile, brand);
+    }
+
+    const textFilters: string[] = [];
+    if (showCaption) {
+      const position = input?.subtitlePosition === 'Top' ? '48' : 'h-text_h-84';
+      textFilters.push(
+        `drawtext=fontfile=${FONT_PATH}:textfile=${captionFile}:fontsize=${captionSize}:fontcolor=white:box=1:boxcolor=black@0.55:boxborderw=12:x=(w-text_w)/2:y=${position}:line_spacing=8`
+      );
+    }
+    if (brand) {
+      textFilters.push(
+        `drawtext=fontfile=${FONT_PATH}:textfile=${brandFile}:fontsize=24:fontcolor=${brandColor}:box=1:boxcolor=black@0.45:boxborderw=10:x=w-text_w-32:y=32`
+      );
+    }
+
+    const concatList = path.join(tmpDir, 'concat.txt');
+    const concatEntries: string[] = [];
+    const ffmpegOptions = { timeout: 180000, maxBuffer: 16 * 1024 * 1024 };
+
+    // Caption/brand are baked into one still per scene, then the still is looped
+    // in memory. Re-running drawtext per frame made renders ~4x slower.
+    for (let index = 0; index < files.length; index++) {
+      const still = path.join(tmpDir, `still-${index}.jpg`);
+      await execFileAsync(
+        'ffmpeg',
+        [
+          '-loglevel',
+          'error',
+          '-i',
+          files[index],
+          '-vf',
+          [
+            `scale=${width}:${height}:force_original_aspect_ratio=increase`,
+            `crop=${width}:${height}`,
+            ...textFilters,
+          ].join(','),
+          '-frames:v',
+          '1',
+          '-q:v',
+          '2',
+          '-y',
+          still,
+        ],
+        ffmpegOptions
+      );
+
+      const duration = durations[index];
+      const filters = [
+        `loop=loop=${Math.max(1, Math.round(duration * fps) - 1)}:size=1:start=0`,
+        `setpts=N/(${fps}*TB)`,
+        `fps=${fps}`,
+        'format=yuv420p',
+      ];
+      if (fadeDuration > 0) {
+        filters.push(
+          `fade=t=in:st=0:d=${fadeDuration.toFixed(2)}`,
+          `fade=t=out:st=${(duration - fadeDuration).toFixed(2)}:d=${fadeDuration.toFixed(2)}`
+        );
+      }
+      const scenePath = path.join(tmpDir, `scene-${index}.mp4`);
+      await execFileAsync(
+        'ffmpeg',
+        [
+          '-loglevel',
+          'error',
+          '-i',
+          still,
+          '-vf',
+          filters.join(','),
+          '-t',
+          String(duration),
+          '-c:v',
+          'libx264',
+          '-preset',
+          'ultrafast',
+          '-crf',
+          '28',
+          '-pix_fmt',
+          'yuv420p',
+          '-r',
+          String(fps),
+          '-threads',
+          '2',
+          '-an',
+          '-y',
+          scenePath,
+        ],
+        ffmpegOptions
+      );
+      concatEntries.push(`file '${scenePath.replace(/'/g, "'\\''")}'`);
+    }
+
+    await fs.writeFile(concatList, concatEntries.join('\n'));
+    const silentVideo = path.join(tmpDir, 'silent.mp4');
+    await execFileAsync(
+      'ffmpeg',
+      ['-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', concatList, '-c', 'copy', '-an', '-y', silentVideo],
+      ffmpegOptions
+    );
+    await execFileAsync(
+      'ffmpeg',
+      [
+        '-loglevel',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'anullsrc=channel_layout=stereo:sample_rate=44100',
+        '-i',
+        silentVideo,
+        '-shortest',
+        '-c:v',
+        'copy',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '64k',
+        '-movflags',
+        '+faststart',
+        '-y',
+        outPath,
+      ],
+      ffmpegOptions
+    );
+
+    const stat = await fs.stat(outPath);
+    if (!stat.size) throw new Error('Hasil render kosong');
+
+    return {
+      mock: false,
+      type: 'video_render',
+      url: `/api/v1/video/files/${jobId}.mp4`,
+      size: stat.size,
+      duration: total,
+      width,
+      height,
+      fps,
+      scenes: files.length,
+      generatedAt: new Date().toISOString(),
+    };
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
 
 function estimateTokens(input: unknown, output: unknown) {
   const raw = `${JSON.stringify(input ?? {})}${JSON.stringify(output ?? {})}`;
@@ -48,14 +286,7 @@ async function processJob(data: any) {
   if (config.endpoint) {
     output = await callProvider(config.endpoint, config.apiKey, { type, input });
   } else if (type.includes('video')) {
-    output = {
-      mock: true,
-      type,
-      url: null,
-      preview: '/images/video-preview.png',
-      echoedInput: input,
-      generatedAt: new Date().toISOString(),
-    };
+    output = await renderVideoFile(jobId, input);
   } else {
     const niche = (input as any)?.niche || 'topik Anda';
     const format = (input as any)?.type || 'konten';
@@ -111,7 +342,7 @@ export const aiWorker = new Worker(
       throw err;
     }
   },
-  { connection, concurrency: 2 }
+  { connection, concurrency: 2, lockDuration: 360000 }
 );
 
 aiWorker.on('completed', job => console.log(`Job ${job.id} selesai`));

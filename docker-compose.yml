@@ -39,6 +39,9 @@ services:
       PORT: 3000
       DEFAULT_TEXT_PROVIDER_ID: ${DEFAULT_TEXT_PROVIDER_ID:-}
       DEFAULT_VIDEO_PROVIDER_ID: ${DEFAULT_VIDEO_PROVIDER_ID:-}
+      VIDEO_STORAGE_DIR: /app/storage
+    volumes:
+      - video-storage:/app/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,6 +60,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-creative_partner}?schema=public
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-super_secret_key_change_me}
+      VIDEO_STORAGE_DIR: /app/storage
+    volumes:
+      - video-storage:/app/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -88,3 +94,4 @@ services:
 
 volumes:
   pgdata:
+  video-storage:
