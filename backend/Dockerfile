@@ -14,7 +14,10 @@ RUN npx prisma generate
 RUN npm run build
 
 FROM node:20-bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y openssl ffmpeg fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y openssl ffmpeg fonts-dejavu-core python3 python3-venv \
+  && python3 -m venv /opt/tts \
+  && /opt/tts/bin/pip install --no-cache-dir edge-tts \
+  && rm -rf /var/lib/apt/lists/* /root/.cache
 WORKDIR /app
 ENV NODE_ENV=production
 

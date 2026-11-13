@@ -97,6 +97,13 @@ export default function VideoStudio() {
   const [language, setLanguage] = useState('English (US)');
   const [speed, setSpeed] = useState(1);
   const [mood, setMood] = useState('Neutral');
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [voiceScript, setVoiceScript] = useState('');
+  const [musicStyle, setMusicStyle] = useState('Soft Ambient');
+  const [musicVolume, setMusicVolume] = useState(0.3);
+  const [voiceTesting, setVoiceTesting] = useState(false);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewUrlRef = useRef('');
   const [avatarIndex, setAvatarIndex] = useState(0);
   const [avatarLook, setAvatarLook] = useState('Natural');
   const [transition, setTransition] = useState('Fade');
@@ -148,6 +155,10 @@ export default function VideoStudio() {
         setLanguage(draft.language ?? 'English (US)');
         setSpeed(Number(draft.speed ?? 1));
         setMood(draft.mood ?? 'Neutral');
+        setVoiceEnabled(draft.voiceEnabled ?? true);
+        setVoiceScript(draft.voiceScript ?? '');
+        setMusicStyle(draft.musicStyle ?? 'Soft Ambient');
+        setMusicVolume(Number(draft.musicVolume ?? 0.3));
         setAvatarIndex(Number(draft.avatarIndex ?? 0));
         setAvatarLook(draft.avatarLook ?? 'Natural');
         setTransition(draft.transition ?? 'Fade');
@@ -179,6 +190,13 @@ export default function VideoStudio() {
         localStorage.removeItem('cpai_video_draft');
       }
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      previewAudioRef.current?.pause();
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
   }, []);
 
   const totalSeconds = scenes.reduce((sum, item) => sum + item.duration, 0);
@@ -260,6 +278,14 @@ export default function VideoStudio() {
     if (input.transition) setTransition(input.transition);
     if (input.brandName) setBrandName(input.brandName);
     if (input.brandColor) setBrandColor(input.brandColor);
+    setVoiceEnabled(input.voiceEnabled !== false);
+    if (typeof input.voiceScript === 'string') setVoiceScript(input.voiceScript);
+    if (typeof input.voice === 'string') setVoice(input.voice);
+    if (typeof input.language === 'string') setLanguage(input.language);
+    if (Number.isFinite(Number(input.speed))) setSpeed(Number(input.speed));
+    if (typeof input.mood === 'string') setMood(input.mood);
+    if (input.musicStyle) setMusicStyle(input.musicStyle);
+    if (Number.isFinite(Number(input.musicVolume))) setMusicVolume(Number(input.musicVolume));
     notify('Pengaturan render dimuat ke editor. Sesuaikan lalu render ulang.');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -292,6 +318,10 @@ export default function VideoStudio() {
         language,
         speed,
         mood,
+        voiceEnabled,
+        voiceScript,
+        musicStyle,
+        musicVolume,
         avatarIndex,
         avatarLook,
         transition,
@@ -463,6 +493,35 @@ export default function VideoStudio() {
     }
   }
 
+  async function testVoice() {
+    const text = (voiceScript.trim() || caption.trim() || scriptText.trim()).slice(0, 1200);
+    if (!text) {
+      setError('Isi voice script atau caption dulu untuk menguji suara.');
+      return;
+    }
+    setError('');
+    setVoiceTesting(true);
+    try {
+      const { data } = await api.post(
+        '/video/tts/preview',
+        { text, voice, language, speed, mood },
+        { responseType: 'blob' }
+      );
+      previewAudioRef.current?.pause();
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      const url = URL.createObjectURL(data as Blob);
+      previewUrlRef.current = url;
+      const audio = new Audio(url);
+      previewAudioRef.current = audio;
+      await audio.play();
+      notify('Memutar contoh voiceover.');
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setVoiceTesting(false);
+    }
+  }
+
   async function exportVideo() {
     const text = caption.trim() || scriptText.trim();
     if (!text) {
@@ -494,6 +553,14 @@ export default function VideoStudio() {
         brandFont,
         resolution,
         fps,
+        voiceEnabled,
+        voiceScript,
+        voice,
+        language,
+        speed,
+        mood,
+        musicStyle,
+        musicVolume,
       });
       notify(`Render video dikirim ke worker (job ${data.jobId}). Proses 30-180 detik.`);
 
@@ -1013,7 +1080,15 @@ export default function VideoStudio() {
             <div className="card side-card">
               <div className="side-title">
                 <b>Voiceover</b>
-                <span className="card-link">Edit Voice</span>
+                <button
+                  className="btn ghost sm"
+                  onClick={testVoice}
+                  disabled={voiceTesting}
+                  title="Buat contoh suara dengan pengaturan saat ini"
+                >
+                  <Mic size={12} />
+                  {voiceTesting ? 'Menyiapkan...' : 'Tes suara'}
+                </button>
               </div>
               <div className="waveform">
                 {bars.map((height, index) => (
@@ -1021,10 +1096,20 @@ export default function VideoStudio() {
                 ))}
               </div>
               <div className="side-meta">
-                <span>00:00 / {durationLabel}</span>
+                <span>{voiceScript.trim() ? 'Script voiceover' : 'Sumber: caption'}</span>
                 <span>{speed.toFixed(1)}x</span>
               </div>
-              <div className="form-row" style={{ marginTop: 12, marginBottom: 8 }}>
+              <div className="form-row" style={{ marginTop: 12 }}>
+                <label>Voice script</label>
+                <textarea
+                  rows={4}
+                  value={voiceScript}
+                  placeholder="Teks yang dibacakan. Kosongkan untuk memakai caption."
+                  onChange={event => setVoiceScript(event.target.value)}
+                  style={{ resize: 'vertical' }}
+                />
+              </div>
+              <div className="form-row" style={{ marginBottom: 8 }}>
                 <label>Voice</label>
                 <select value={voice} onChange={event => setVoice(event.target.value)}>
                   <option>Ava (Neutral)</option>
@@ -1040,6 +1125,20 @@ export default function VideoStudio() {
                   <option>English (UK)</option>
                 </select>
               </div>
+              <div className="form-row" style={{ marginBottom: 10 }}>
+                <label>Mood</label>
+                <div className="segmented">
+                  {['Neutral', 'Warm', 'Energetic', 'Calm'].map(item => (
+                    <button
+                      key={item}
+                      className={mood === item ? 'active' : ''}
+                      onClick={() => setMood(item)}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="side-meta" style={{ marginBottom: 4 }}>
                 <span>Speed</span>
                 <span>{speed.toFixed(1)}x</span>
@@ -1053,6 +1152,42 @@ export default function VideoStudio() {
                 value={speed}
                 onChange={event => setSpeed(Number(event.target.value))}
               />
+              <div className="side-meta" style={{ marginTop: 14 }}>
+                <span>Voiceover aktif</span>
+                <button
+                  className={voiceEnabled ? 'btn sm' : 'btn ghost sm'}
+                  onClick={() => setVoiceEnabled(value => !value)}
+                >
+                  {voiceEnabled && <Check size={12} />}
+                  {voiceEnabled ? 'Aktif' : 'Nonaktif'}
+                </button>
+              </div>
+              <div className="form-row" style={{ marginTop: 14, marginBottom: 8 }}>
+                <label>Musik latar</label>
+                <select value={musicStyle} onChange={event => setMusicStyle(event.target.value)}>
+                  <option>Soft Ambient</option>
+                  <option>Upbeat</option>
+                  <option>Cinematic</option>
+                  <option>None</option>
+                </select>
+              </div>
+              <div className="side-meta" style={{ marginBottom: 4 }}>
+                <span>Volume musik</span>
+                <span>{Math.round(musicVolume * 100)}%</span>
+              </div>
+              <input
+                className="range"
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={musicVolume}
+                disabled={musicStyle === 'None'}
+                onChange={event => setMusicVolume(Number(event.target.value))}
+              />
+              <p className="muted" style={{ fontSize: 11, marginTop: 12, marginBottom: 0 }}>
+                Suara neural dan musik disintesis saat render, lalu otomatis mengikuti durasi video.
+              </p>
             </div>
           )}
 

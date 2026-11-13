@@ -6,6 +6,7 @@ import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/auth';
 import { rbac } from '../middleware/rbac';
 import { assertQuota, submitAIJob } from '../services/aiProvider';
+import { synthesizeSpeech } from '../services/tts';
 
 const router = Router();
 const STORAGE_DIR = process.env.VIDEO_STORAGE_DIR || '/app/storage';
@@ -37,6 +38,14 @@ const videoSchema = z
     brandFont: z.string().max(40).optional(),
     resolution: z.string().max(40).optional(),
     fps: z.string().max(20).optional(),
+    voiceEnabled: z.boolean().optional(),
+    voiceScript: z.string().max(1500).optional(),
+    voice: z.string().max(40).optional(),
+    language: z.string().max(40).optional(),
+    speed: z.number().min(0.5).max(2).optional(),
+    mood: z.string().max(20).optional(),
+    musicStyle: z.enum(['None', 'Soft Ambient', 'Upbeat', 'Cinematic']).optional(),
+    musicVolume: z.number().min(0).max(1).optional(),
   })
   .refine(
     data =>
@@ -46,6 +55,34 @@ const videoSchema = z
       (data.source === 'image' && !!data.images?.length),
     { message: 'Sumber video tidak lengkap' }
   );
+
+const ttsPreviewSchema = z.object({
+  text: z.string().trim().min(1).max(1200),
+  voice: z.string().max(40).optional(),
+  language: z.string().max(40).optional(),
+  speed: z.number().min(0.5).max(2).optional(),
+  mood: z.string().max(20).optional(),
+});
+
+router.post('/tts/preview', authenticate, rbac('create_video'), async (req: Request, res: Response) => {
+  const parse = ttsPreviewSchema.safeParse(req.body);
+  if (!parse.success) {
+    return res.status(400).json({ error: 'Invalid input', details: parse.error.format() });
+  }
+  try {
+    const speech = await synthesizeSpeech(parse.data);
+    if (!speech) return res.status(400).json({ error: 'Teks voiceover kosong' });
+    const audio = await fs.readFile(speech.file);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.removeHeader('Content-Security-Policy');
+    res.type('audio/mpeg').send(audio);
+  } catch (error) {
+    res.status(502).json({
+      error: 'Voiceover gagal dibuat',
+      details: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
 
 router.post('/render', authenticate, rbac('create_video'), async (req: Request, res: Response) => {
   const parse = videoSchema.safeParse(req.body);

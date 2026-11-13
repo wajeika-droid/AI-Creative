@@ -7,6 +7,8 @@ import { promisify } from 'node:util';
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { prisma } from '../lib/prisma';
+import { muxAudio, resolveMusicStyle } from './audioTrack';
+import { probeDuration, resolveVoice, synthesizeSpeech } from './tts';
 
 const connection = new IORedis(process.env.REDIS_URL || 'redis://redis:6379', {
   maxRetriesPerRequest: null,
@@ -100,6 +102,30 @@ async function renderVideoFile(jobId: string, input: any) {
       brandFile = path.join(tmpDir, 'brand.txt');
       await fs.writeFile(brandFile, brand);
     }
+
+    const voiceEnabled = input?.voiceEnabled !== false;
+    const voiceText = plainText(input?.voiceScript || caption || input?.script || input?.text).slice(
+      0,
+      1200
+    );
+    // Start TTS while scenes encode; the worker waits for it only before muxing audio.
+    const speechPromise =
+      voiceEnabled && voiceText
+        ? synthesizeSpeech({
+            text: voiceText,
+            voice: input?.voice,
+            language: input?.language,
+            speed: input?.speed,
+            mood: input?.mood,
+          }).catch(error => {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(`TTS gagal, render tanpa voiceover: ${message}`);
+            return null;
+          })
+        : Promise.resolve(null);
+    const musicStyle =
+      input?.musicStyle === undefined ? 'Soft Ambient' : resolveMusicStyle(input.musicStyle);
+    const musicVolume = clamp(Number(input?.musicVolume ?? 0.3), 0, 1);
 
     const textFilters: string[] = [];
     if (showCaption) {
@@ -198,31 +224,18 @@ async function renderVideoFile(jobId: string, input: any) {
       ['-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', concatList, '-c', 'copy', '-an', '-y', silentVideo],
       ffmpegOptions
     );
-    await execFileAsync(
-      'ffmpeg',
-      [
-        '-loglevel',
-        'error',
-        '-f',
-        'lavfi',
-        '-i',
-        'anullsrc=channel_layout=stereo:sample_rate=44100',
-        '-i',
-        silentVideo,
-        '-shortest',
-        '-c:v',
-        'copy',
-        '-c:a',
-        'aac',
-        '-b:a',
-        '64k',
-        '-movflags',
-        '+faststart',
-        '-y',
-        outPath,
-      ],
-      ffmpegOptions
-    );
+
+    const speech = await speechPromise;
+    const voiceDuration = speech ? await probeDuration(speech.file) : 0;
+    await muxAudio({
+      silentVideo,
+      outPath,
+      duration: total,
+      voiceFile: speech?.file,
+      voiceDuration,
+      musicStyle,
+      musicVolume,
+    });
 
     const stat = await fs.stat(outPath);
     if (!stat.size) throw new Error('Hasil render kosong');
@@ -237,6 +250,16 @@ async function renderVideoFile(jobId: string, input: any) {
       height,
       fps,
       scenes: files.length,
+      audio: {
+        voiceover: speech
+          ? {
+              enabled: true,
+              voice: resolveVoice(input?.voice, input?.language),
+              duration: Number(voiceDuration.toFixed(2)),
+            }
+          : { enabled: false },
+        music: { style: musicStyle, volume: musicVolume },
+      },
       generatedAt: new Date().toISOString(),
     };
   } finally {
